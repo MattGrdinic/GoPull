@@ -12,37 +12,37 @@
 			containerPortal = C9C342C0303E0B6B002ED368 /* Project object */;
 			proxyType = 1;
 			remoteGlobalIDString = C9C342C7303E0B6B002ED368;
-			remoteInfo = GoPro;
+			remoteInfo = GoPull;
 		};
 		C9C342E0303E0B6C002ED368 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = C9C342C0303E0B6B002ED368 /* Project object */;
 			proxyType = 1;
 			remoteGlobalIDString = C9C342C7303E0B6B002ED368;
-			remoteInfo = GoPro;
+			remoteInfo = GoPull;
 		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
-		C9C342C8303E0B6B002ED368 /* GoPro.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = GoPro.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		C9C342D5303E0B6C002ED368 /* GoProTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = GoProTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		C9C342DF303E0B6C002ED368 /* GoProUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = GoProUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		C9C342C8303E0B6B002ED368 /* GoPull.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = GoPull.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		C9C342D5303E0B6C002ED368 /* GoPullTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = GoPullTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		C9C342DF303E0B6C002ED368 /* GoPullUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = GoPullUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		C9C342CA303E0B6B002ED368 /* GoPro */ = {
+		C9C342CA303E0B6B002ED368 /* GoPull */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			path = GoPro;
+			path = GoPull;
 			sourceTree = "<group>";
 		};
-		C9C342D8303E0B6C002ED368 /* GoProTests */ = {
+		C9C342D8303E0B6C002ED368 /* GoPullTests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			path = GoProTests;
+			path = GoPullTests;
 			sourceTree = "<group>";
 		};
-		C9C342E2303E0B6C002ED368 /* GoProUITests */ = {
+		C9C342E2303E0B6C002ED368 /* GoPullUITests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			path = GoProUITests;
+			path = GoPullUITests;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -75,9 +75,9 @@
 		C9C342BF303E0B6B002ED368 = {
 			isa = PBXGroup;
 			children = (
-				C9C342CA303E0B6B002ED368 /* GoPro */,
-				C9C342D8303E0B6C002ED368 /* GoProTests */,
-				C9C342E2303E0B6C002ED368 /* GoProUITests */,
+				C9C342CA303E0B6B002ED368 /* GoPull */,
+				C9C342D8303E0B6C002ED368 /* GoPullTests */,
+				C9C342E2303E0B6C002ED368 /* GoPullUITests */,
 				C9C342C9303E0B6B002ED368 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -85,9 +85,9 @@
 		C9C342C9303E0B6B002ED368 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				C9C342C8303E0B6B002ED368 /* GoPro.app */,
-				C9C342D5303E0B6C002ED368 /* GoProTests.xctest */,
-				C9C342DF303E0B6C002ED368 /* GoProUITests.xctest */,
+				C9C342C8303E0B6B002ED368 /* GoPull.app */,
+				C9C342D5303E0B6C002ED368 /* GoPullTests.xctest */,
+				C9C342DF303E0B6C002ED368 /* GoPullUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -95,9 +95,9 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		C9C342C7303E0B6B002ED368 /* GoPro */ = {
+		C9C342C7303E0B6B002ED368 /* GoPull */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = C9C342E9303E0B6C002ED368 /* Build configuration list for PBXNativeTarget "GoPro" */;
+			buildConfigurationList = C9C342E9303E0B6C002ED368 /* Build configuration list for PBXNativeTarget "GoPull" */;
 			buildPhases = (
 				C9C342C4303E0B6B002ED368 /* Sources */,
 				C9C342C5303E0B6B002ED368 /* Frameworks */,
@@ -108,18 +108,18 @@
 			dependencies = (
 			);
 			fileSystemSynchronizedGroups = (
-				C9C342CA303E0B6B002ED368 /* GoPro */,
+				C9C342CA303E0B6B002ED368 /* GoPull */,
 			);
-			name = GoPro;
+			name = GoPull;
 			packageProductDependencies = (
 			);
-			productName = GoPro;
-			productReference = C9C342C8303E0B6B002ED368 /* GoPro.app */;
+			productName = GoPull;
+			productReference = C9C342C8303E0B6B002ED368 /* GoPull.app */;
 			productType = "com.apple.product-type.application";
 		};
-		C9C342D4303E0B6C002ED368 /* GoProTests */ = {
+		C9C342D4303E0B6C002ED368 /* GoPullTests */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = C9C342EC303E0B6C002ED368 /* Build configuration list for PBXNativeTarget "GoProTests" */;
+			buildConfigurationList = C9C342EC303E0B6C002ED368 /* Build configuration list for PBXNativeTarget "GoPullTests" */;
 			buildPhases = (
 				C9C342D1303E0B6C002ED368 /* Sources */,
 				C9C342D2303E0B6C002ED368 /* Frameworks */,
@@ -131,18 +131,18 @@
 				C9C342D7303E0B6C002ED368 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
-				C9C342D8303E0B6C002ED368 /* GoProTests */,
+				C9C342D8303E0B6C002ED368 /* GoPullTests */,
 			);
-			name = GoProTests;
+			name = GoPullTests;
 			packageProductDependencies = (
 			);
-			productName = GoProTests;
-			productReference = C9C342D5303E0B6C002ED368 /* GoProTests.xctest */;
+			productName = GoPullTests;
+			productReference = C9C342D5303E0B6C002ED368 /* GoPullTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
 		};
-		C9C342DE303E0B6C002ED368 /* GoProUITests */ = {
+		C9C342DE303E0B6C002ED368 /* GoPullUITests */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = C9C342EF303E0B6C002ED368 /* Build configuration list for PBXNativeTarget "GoProUITests" */;
+			buildConfigurationList = C9C342EF303E0B6C002ED368 /* Build configuration list for PBXNativeTarget "GoPullUITests" */;
 			buildPhases = (
 				C9C342DB303E0B6C002ED368 /* Sources */,
 				C9C342DC303E0B6C002ED368 /* Frameworks */,
@@ -154,13 +154,13 @@
 				C9C342E1303E0B6C002ED368 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
-				C9C342E2303E0B6C002ED368 /* GoProUITests */,
+				C9C342E2303E0B6C002ED368 /* GoPullUITests */,
 			);
-			name = GoProUITests;
+			name = GoPullUITests;
 			packageProductDependencies = (
 			);
-			productName = GoProUITests;
-			productReference = C9C342DF303E0B6C002ED368 /* GoProUITests.xctest */;
+			productName = GoPullUITests;
+			productReference = C9C342DF303E0B6C002ED368 /* GoPullUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
 		};
 /* End PBXNativeTarget section */
@@ -186,7 +186,7 @@
 					};
 				};
 			};
-			buildConfigurationList = C9C342C3303E0B6B002ED368 /* Build configuration list for PBXProject "GoPro" */;
+			buildConfigurationList = C9C342C3303E0B6B002ED368 /* Build configuration list for PBXProject "GoPull" */;
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
@@ -200,9 +200,9 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				C9C342C7303E0B6B002ED368 /* GoPro */,
-				C9C342D4303E0B6C002ED368 /* GoProTests */,
-				C9C342DE303E0B6C002ED368 /* GoProUITests */,
+				C9C342C7303E0B6B002ED368 /* GoPull */,
+				C9C342D4303E0B6C002ED368 /* GoPullTests */,
+				C9C342DE303E0B6C002ED368 /* GoPullUITests */,
 			);
 		};
 /* End PBXProject section */
@@ -258,12 +258,12 @@
 /* Begin PBXTargetDependency section */
 		C9C342D7303E0B6C002ED368 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
-			target = C9C342C7303E0B6B002ED368 /* GoPro */;
+			target = C9C342C7303E0B6B002ED368 /* GoPull */;
 			targetProxy = C9C342D6303E0B6C002ED368 /* PBXContainerItemProxy */;
 		};
 		C9C342E1303E0B6C002ED368 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
-			target = C9C342C7303E0B6B002ED368 /* GoPro */;
+			target = C9C342C7303E0B6B002ED368 /* GoPull */;
 			targetProxy = C9C342E0303E0B6C002ED368 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
@@ -398,18 +398,19 @@
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = B2BC79PA4C;
-				ENABLE_APP_SANDBOX = YES;
+				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Info.plist;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.nicsoft.write.GoPro;
+				PRODUCT_BUNDLE_IDENTIFIER = com.nicsoft.write.GoPull;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -430,18 +431,19 @@
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = B2BC79PA4C;
-				ENABLE_APP_SANDBOX = YES;
+				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Info.plist;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.nicsoft.write.GoPro;
+				PRODUCT_BUNDLE_IDENTIFIER = com.nicsoft.write.GoPull;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -463,14 +465,14 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 26.5;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.nicsoft.write.GoProTests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.nicsoft.write.GoPullTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/GoPro.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/GoPro";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/GoPull.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/GoPull";
 			};
 			name = Debug;
 		};
@@ -484,14 +486,14 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 26.5;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.nicsoft.write.GoProTests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.nicsoft.write.GoPullTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/GoPro.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/GoPro";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/GoPull.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/GoPull";
 			};
 			name = Release;
 		};
@@ -503,14 +505,14 @@
 				DEVELOPMENT_TEAM = B2BC79PA4C;
 				GENERATE_INFOPLIST_FILE = YES;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.nicsoft.write.GoProUITests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.nicsoft.write.GoPullUITests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
-				TEST_TARGET_NAME = GoPro;
+				TEST_TARGET_NAME = GoPull;
 			};
 			name = Debug;
 		};
@@ -522,21 +524,21 @@
 				DEVELOPMENT_TEAM = B2BC79PA4C;
 				GENERATE_INFOPLIST_FILE = YES;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.nicsoft.write.GoProUITests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.nicsoft.write.GoPullUITests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
-				TEST_TARGET_NAME = GoPro;
+				TEST_TARGET_NAME = GoPull;
 			};
 			name = Release;
 		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		C9C342C3303E0B6B002ED368 /* Build configuration list for PBXProject "GoPro" */ = {
+		C9C342C3303E0B6B002ED368 /* Build configuration list for PBXProject "GoPull" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				C9C342E7303E0B6C002ED368 /* Debug */,
@@ -545,7 +547,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		C9C342E9303E0B6C002ED368 /* Build configuration list for PBXNativeTarget "GoPro" */ = {
+		C9C342E9303E0B6C002ED368 /* Build configuration list for PBXNativeTarget "GoPull" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				C9C342EA303E0B6C002ED368 /* Debug */,
@@ -554,7 +556,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		C9C342EC303E0B6C002ED368 /* Build configuration list for PBXNativeTarget "GoProTests" */ = {
+		C9C342EC303E0B6C002ED368 /* Build configuration list for PBXNativeTarget "GoPullTests" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				C9C342ED303E0B6C002ED368 /* Debug */,
@@ -563,7 +565,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		C9C342EF303E0B6C002ED368 /* Build configuration list for PBXNativeTarget "GoProUITests" */ = {
+		C9C342EF303E0B6C002ED368 /* Build configuration list for PBXNativeTarget "GoPullUITests" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				C9C342F0303E0B6C002ED368 /* Debug */,

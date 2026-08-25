@@ -1,0 +1,289 @@
+//
+//  ContentView.swift
+//  GoPull
+//
+
+import SwiftUI
+import UniformTypeIdentifiers
+
+struct ContentView: View {
+    @EnvironmentObject private var model: AppModel
+    @State private var choosingDestination = false
+
+    var body: some View {
+        VStack(spacing: 0) {
+            header
+            Divider()
+
+            if model.isConnected {
+                if model.visibleFiles.isEmpty {
+                    emptyCard
+                } else {
+                    fileList
+                }
+                Divider()
+                footer
+            } else {
+                disconnected
+            }
+        }
+        .frame(minWidth: 620, minHeight: 460)
+        .alert("Something went wrong",
+               isPresented: Binding(get: { model.errorMessage != nil },
+                                    set: { if !$0 { model.errorMessage = nil } })) {
+            Button("OK", role: .cancel) { model.errorMessage = nil }
+        } message: {
+            Text(model.errorMessage ?? "")
+        }
+    }
+
+    // MARK: - Header
+
+    private var header: some View {
+        HStack(alignment: .center, spacing: 14) {
+            Image(systemName: model.isConnected ? "camera.fill" : "camera")
+                .font(.system(size: 26))
+                .foregroundStyle(model.isConnected ? Color.accentColor : .secondary)
+                .frame(width: 34)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(model.info?.model ?? "No camera connected")
+                    .font(.headline)
+                if model.isConnected {
+                    Text("\(model.cameraIP) · \(model.visibleFiles.count) file\(model.visibleFiles.count == 1 ? "" : "s") · \(model.totalBytes.byteLabel) used · \(model.freeBytes.byteLabel) free"
+                         + (model.devicesOnCard.count > 1
+                            ? " · " + model.devicesOnCard.map(\.brand).joined(separator: ", ")
+                            : ""))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("Connect by USB and switch the camera on")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Spacer()
+
+            if model.isConnected {
+                mountControls
+            }
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 14)
+    }
+
+    private var mountControls: some View {
+        HStack(spacing: 8) {
+            if model.isMounted {
+                Button("Open in Finder") { model.revealMount() }
+                Button("Eject") { Task { await model.unmount() } }
+                    .disabled(model.isBusy)
+            } else {
+                Button {
+                    Task { await model.mount() }
+                } label: {
+                    Label("Mount as Drive", systemImage: "externaldrive.badge.plus")
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(model.isBusy)
+            }
+        }
+    }
+
+    // MARK: - Empty state
+
+    private var disconnected: some View {
+        VStack(spacing: 10) {
+            Spacer()
+            Image(systemName: "cable.connector")
+                .font(.system(size: 40))
+                .foregroundStyle(.tertiary)
+            Text("Looking for a GoPro…")
+                .font(.title3)
+            Text("The camera must be powered on and set to GoPro Connect mode rather than MTP.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 380)
+            if let note = model.statusNote {
+                Label(note, systemImage: "eject.circle")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 380)
+                    .padding(.top, 4)
+            }
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var emptyCard: some View {
+        VStack(spacing: 8) {
+            Spacer()
+            Image(systemName: model.statusNote == nil ? "film.stack" : "sdcard")
+                .font(.system(size: 34))
+                .foregroundStyle(.tertiary)
+            Text(model.statusNote ?? "No clips on the card.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 380)
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    // MARK: - Files
+
+    private var fileList: some View {
+        List(model.visibleFiles, selection: $model.selection) { file in
+            HStack(spacing: 10) {
+                Image(systemName: model.alreadyImported(file)
+                      ? "checkmark.circle.fill" : "circle.dashed")
+                    .foregroundStyle(model.alreadyImported(file) ? .green : .secondary)
+                    .help(model.alreadyImported(file) ? "Already imported" : "Not imported yet")
+
+                VStack(alignment: .leading, spacing: 1) {
+                    HStack(spacing: 5) {
+                        Text(file.name)
+                        if file.isSidecar {
+                            Text("proxy")
+                                .font(.caption2)
+                                .padding(.horizontal, 4).padding(.vertical, 1)
+                                .background(.quaternary, in: Capsule())
+                        }
+                    }
+                    Text(model.devicesOnCard.count > 1
+                         ? "\(file.device.label) · \(file.folder)"
+                         : file.folder)
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+
+                Spacer()
+
+                if let modified = file.modified {
+                    Text(modified.formatted(date: .abbreviated, time: .shortened))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Text(file.size.byteLabel)
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .frame(width: 72, alignment: .trailing)
+            }
+            .padding(.vertical, 2)
+            .tag(file.id)
+        }
+        .listStyle(.inset)
+    }
+
+    // MARK: - Footer
+
+    private var footer: some View {
+        VStack(spacing: 10) {
+            if model.importer.isRunning {
+                importProgress
+            }
+
+            HStack(alignment: .top, spacing: 14) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Import to")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Button {
+                        choosingDestination = true
+                    } label: {
+                        Text(model.destination.path.replacingOccurrences(
+                            of: NSHomeDirectory(), with: "~"))
+                            .lineLimit(1)
+                            .truncationMode(.head)
+                    }
+                    .buttonStyle(.link)
+                    Text(model.examplePath + "/")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                        .truncationMode(.head)
+                        .help("Where the next import will land")
+                }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Toggle("Date folders", isOn: $model.organiseByDate)
+                        .toggleStyle(.checkbox)
+                        .help("Sort clips into YYYY-MM-DD folders as they are copied")
+
+                    Toggle("Show proxies", isOn: $model.includeSidecars)
+                        .toggleStyle(.checkbox)
+                        .help("Include .LRV/.LRF proxies and thumbnails in the list. "
+                              + "They are always visible on the mounted drive.")
+
+                    HStack(spacing: 6) {
+                        Toggle("Device folders", isOn: $model.separateByCamera)
+                            .toggleStyle(.checkbox)
+                            .help("Give each device its own folder, named after the model "
+                                  + "when the camera knows it")
+
+                        if model.separateByCamera && model.isConnected
+                            && model.devicesOnCard.contains(where: { $0.isAttachedCamera }) {
+                            Stepper(value: Binding(get: { model.cameraNumber },
+                                                   set: { model.setCameraNumber($0) }),
+                                    in: 1...99) {
+                                Text("#\(model.cameraNumber)")
+                                    .font(.caption.monospacedDigit())
+                            }
+                            .help("Distinguishes two bodies of the same model. "
+                                  + "Remembered per camera; #1 is left out of the folder name.")
+                        }
+                    }
+                }
+
+                Spacer()
+
+                if model.importer.isRunning {
+                    Button("Cancel") { model.cancelImport() }
+                } else {
+                    Button("Import Selected") { model.importSelected() }
+                    .disabled(model.selection.isEmpty)
+
+                    Button {
+                        model.importNew()
+                    } label: {
+                        Label("Import \(model.newFiles.count) New",
+                              systemImage: "square.and.arrow.down")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(model.newFiles.isEmpty)
+                }
+            }
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 12)
+        .fileImporter(isPresented: $choosingDestination,
+                      allowedContentTypes: [.folder]) { result in
+            if case .success(let url) = result { model.destination = url }
+        }
+    }
+
+    private var importProgress: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            ProgressView(value: model.importer.progress.fraction)
+            HStack {
+                Text("\(model.importer.progress.fileName) "
+                     + "(\(model.importer.progress.fileIndex) of \(model.importer.progress.fileCount))")
+                Spacer()
+                Text("\(Int64(model.importer.progress.bytesPerSecond).byteLabel)/s")
+                    .monospacedDigit()
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+    }
+}
+
+#Preview {
+    ContentView().environmentObject(AppModel())
+}

@@ -1,13 +1,13 @@
 //
-//  GoProUITestsLaunchTests.swift
-//  GoProUITests
+//  GoPullUITestsLaunchTests.swift
+//  GoPullUITests
 //
 //  Created by Matthew Grdinic on 8/25/26.
 //
 
 import XCTest
 
-final class GoProUITestsLaunchTests: XCTestCase {
+final class GoPullUITestsLaunchTests: XCTestCase {
 
     override class var runsForEachTargetApplicationUIConfiguration: Bool {
         true

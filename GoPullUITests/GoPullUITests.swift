@@ -1,13 +1,13 @@
 //
-//  GoProUITests.swift
-//  GoProUITests
+//  GoPullUITests.swift
+//  GoPullUITests
 //
 //  Created by Matthew Grdinic on 8/25/26.
 //
 
 import XCTest
 
-final class GoProUITests: XCTestCase {
+final class GoPullUITests: XCTestCase {
 
     override func setUpWithError() throws {
         // Put setup code here. This method is called before the invocation of each test method in the class.

@@ -1,0 +1,18 @@
+#!/bin/bash
+# Unmount the GoPro volume and stop the WebDAV bridge.
+set -uo pipefail
+MOUNTPOINT="${GOPRO_MOUNTPOINT:-$HOME/GoPro-Camera}"
+PIDFILE="$HOME/.gopro-webdav.pid"
+[ "${1:-}" = "--at" ] && MOUNTPOINT="$2"
+
+if mount | grep -q " on ${MOUNTPOINT} (webdav"; then
+  umount "$MOUNTPOINT" && echo "Unmounted ${MOUNTPOINT}"
+else
+  echo "Nothing mounted at ${MOUNTPOINT}"
+fi
+
+if [ -f "$PIDFILE" ]; then
+  PID="$(cat "$PIDFILE")"
+  if kill "$PID" 2>/dev/null; then echo "Stopped bridge (pid $PID)"; fi
+  rm -f "$PIDFILE"
+fi

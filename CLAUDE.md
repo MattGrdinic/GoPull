@@ -1,0 +1,150 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## What this project is
+
+**GoPull** is a macOS app that makes a USB-tethered GoPro (a **MISSION 1 PRO**) usable as if
+it were an external drive, plus a set of Python CLI tools that do the same thing without the
+app. The app target, module and product are all `GoPull`; the type `GoProCamera` and the many
+"GoPro" strings refer to the camera itself and are correct as they stand.
+
+The problem it solves: modern GoPros do **not** present as USB mass storage. Plugging one
+in raises a *USB Ethernet (NCM)* interface and the camera serves HTTP on port 8080. So the
+card can only be reached over the network, not through the filesystem — until you put a
+WebDAV server in front of it, which is what this project does.
+
+Deep documentation lives in [docs/](docs/): [ARCHITECTURE.md](docs/ARCHITECTURE.md) for how
+it works, [DECISIONS.md](docs/DECISIONS.md) for why it's built this way, and
+[TESTING.md](docs/TESTING.md) for how to verify changes against real hardware.
+
+## Commands
+
+```bash
+# Build
+xcodebuild -project GoPull.xcodeproj -scheme GoPull -configuration Debug -destination 'platform=macOS' build
+
+# Test (unit tests only; the UI test target launches the app)
+xcodebuild test -project GoPull.xcodeproj -scheme GoPull -destination 'platform=macOS' -only-testing:GoPullTests
+
+# A single test
+xcodebuild test -project GoPull.xcodeproj -scheme GoPull -destination 'platform=macOS' -only-testing:GoPullTests/GoPullTests/example
+
+# Release build + install
+xcodebuild -project GoPull.xcodeproj -scheme GoPull -configuration Release -destination 'platform=macOS' -derivedDataPath /tmp/gopull-dd build
+rm -rf /Applications/GoPull.app && cp -R /tmp/gopull-dd/Build/Products/Release/GoPull.app /Applications/
+```
+
+`GoPullTests` uses **Swift Testing** (`@Test`); `GoPullUITests` uses XCTest.
+
+The Python CLI equivalents live in [tools/](tools/) and need no build step — see
+[tools/README.md](tools/README.md).
+
+## Architecture
+
+Understanding this codebase means understanding one unusual data path.
+
+**Discovery.** GoPro Connect assigns the Mac `x.x.x.55` and keeps `x.x.x.51` for the camera,
+always inside `172.16.0.0/12`. `GoProCamera.candidateAddresses()` walks `getifaddrs`, derives
+every plausible `.51`, and probes `/gopro/camera/info`. Nothing is hardcoded, so it survives
+reconnects and other GoPro models.
+
+**The mount.** `WebDAVServer` is a small HTTP server on `127.0.0.1` (an `NWListener` from
+Network.framework). `MountController` then runs `/sbin/mount_webdav` against it. macOS's
+*built-in* WebDAV client does the actual mounting — there is no macFUSE, no kernel extension
+and no `sudo` anywhere.
+
+**The redirect, which is the key design point.** The server answers `OPTIONS` and `PROPFIND`
+itself, but answers `GET`/`HEAD` with a **302 to the camera's own file server**. macOS follows
+the redirect *and re-sends its `Range` header*, so clip data flows straight from camera to
+kernel and never passes through this process. That is why a 500 MB clip is never buffered and
+why seeking stays as fast as reading the camera directly. Do not "fix" this into a proxy.
+
+**Read-only is deliberate.** The server advertises `DAV: 1` only (no class 2 / locking) and
+returns 403 for every mutating method. That combination is what makes macOS mount the volume
+read-only, which in turn means footage can't be deleted by accident and macOS won't try to
+write `.DS_Store` to the card.
+
+**Importing is a separate, faster path.** `Importer` downloads via parallel HTTP range
+requests (8 MB chunks, 4 in flight) — about 51 MB/s versus ~40 MB/s for a single stream. It
+writes through `pwrite` at offsets into a preallocated `.part` file, so a failure never leaves
+a corrupt clip in place.
+
+### Files
+
+| file | role |
+|---|---|
+| `GoPull/GoProCamera.swift` | `actor` — discovery, media list, camera state. The only thing that talks to the camera's API. |
+| `GoPull/WebDAVServer.swift` | The WebDAV server and its HTTP connection handling (`Peer`, at the bottom of the file). |
+| `GoPull/MountController.swift` | `mount_webdav` / `umount`, and mount detection via `statfs` (`f_fstypename == "webdav"`). |
+| `GoPull/Importer.swift` | `@MainActor ObservableObject` — the parallel range downloader and its progress. |
+| `GoPull/AppModel.swift` | `@MainActor` singleton (`AppModel.shared`) wiring polling, mounting and importing together. |
+| `GoPull/GoPullApp.swift` | App entry, `MenuBarExtra`, and the `AppDelegate` that starts polling and unmounts on quit. |
+
+`Peer` is `fileprivate`-coupled to `WebDAVServer`, so it has to stay in the same file.
+
+## Project-specific gotchas
+
+**App Sandbox must stay off.** A sandboxed child process cannot mount a filesystem, so
+`mount_webdav` fails outright. `ENABLE_APP_SANDBOX = NO` in the project is load-bearing.
+Hardened Runtime is on and is fine — verified that a Hardened-Runtime-signed binary can still
+bind the listener and mount.
+
+**`import Combine` explicitly.** The project enables
+`SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY`, so SwiftUI's re-export of Combine is *not*
+enough. Any file declaring `ObservableObject` must import Combine or you get a confusing
+"does not conform to protocol 'ObservableObject'" error at the *use* site, not the declaration.
+
+**`Info.plist` lives at the repo root, not in `GoPro/`.** The project uses Xcode 16+
+file-system-synchronized groups (`objectVersion = 77`), so *everything* in `GoPro/` is added
+to the target automatically. That's convenient for new `.swift` files — just create them, never
+hand-edit the pbxproj — but a plist in there lands in Copy Bundle Resources and warns. The
+plist only carries the ATS exception (the camera is plain HTTP); Xcode still generates and
+merges the rest.
+
+**The mount belongs to the process.** The WebDAV server runs inside the app, so quitting
+unmounts the volume — `applicationWillTerminate` does this on purpose rather than stranding a
+dead volume in Finder. Any change that could kill the app mid-session breaks a live mount.
+
+**`df` reports the volume as 0 bytes and that is not a bug.** macOS's WebDAV client only ever
+requests `getlastmodified`, `getcontentlength`, `creationdate` and `resourcetype` — it never
+asks for the RFC 4331 quota properties. The server serves them correctly anyway for other
+clients. Confirmed by instrumenting the request stream; don't re-investigate.
+
+**Never call `statfs` or `umount` on the main actor.** Both can block on a WebDAV volume whose
+server has gone — exactly the unplugged-camera case — and blocking the main actor beachballs
+the UI. `AppModel` routes them through `Task.detached` and only mutates published state back on
+the main actor. `unmountForShutdown()` is the one deliberate exception, because blocking during
+`applicationWillTerminate` is both acceptable and necessary.
+
+**Don't use `URLSession.shared` for camera traffic.** Its resource timeout defaults to seven
+days, which means requests survive the cable being pulled. `Importer` has its own session with
+15s request / 60s resource timeouts; `GoProCamera` likewise.
+
+**`AppModel` owns the import `Task`, not `Importer`.** Cancellation needs something to cancel:
+an earlier version stored the task on `Importer` but never assigned it, which made both the
+Cancel button and disconnect-cancellation silently do nothing. If you move import orchestration
+around, keep the task where it can actually be cancelled.
+
+**Cancellation makes every `await` throw, including inside `refresh()`.** `refresh()` bails on
+`Task.isCancelled` and swallows `CancellationError` for exactly this reason: without it,
+cancelling an import made the app conclude the camera had vanished, which also fed the
+auto-eject path. Any handler that infers *state of the world* from a failed await must rule out
+cancellation first.
+
+**Camera present with no card looks like no camera.** `/gopro/media/list` fails either way.
+`refresh()` disambiguates with `keepAlive()`; don't collapse those branches.
+
+**Camera must be in "GoPro Connect" USB mode**, not MTP, or nothing is discoverable.
+
+## Testing against real hardware
+
+The interesting code paths need a camera attached, and the app's buttons can't be clicked from
+automation. The established approach is to compile the non-UI sources into a throwaway CLI
+harness with `swiftc` and drive them directly — see [docs/TESTING.md](docs/TESTING.md) for the
+exact invocation and the pitfalls (notably: a harness `main.swift` must call `dispatchMain()`,
+because blocking the main thread deadlocks all `@MainActor` work).
+
+Note that plain `swiftc -swift-version 5` does **not** enable bare-slash regex literals, while
+the Xcode build does pass `-enable-bare-slash-regex`. Code shared with the harness should avoid
+regex literals.

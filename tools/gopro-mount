@@ -1,0 +1,68 @@
+#!/bin/bash
+# Mount the attached GoPro's SD card as a read-only volume on macOS.
+# Uses the built-in WebDAV client -- no macFUSE, no kext, no sudo.
+set -euo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PORT="${GOPRO_DAV_PORT:-8788}"
+MOUNTPOINT="${GOPRO_MOUNTPOINT:-$HOME/GoPro-Camera}"
+LOG="$HOME/Library/Logs/gopro-webdav.log"
+PIDFILE="$HOME/.gopro-webdav.pid"
+OPEN_FINDER=1
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --at) MOUNTPOINT="$2"; shift 2 ;;
+    --port) PORT="$2"; shift 2 ;;
+    --no-open) OPEN_FINDER=0; shift ;;
+    -h|--help)
+      echo "usage: gopro-mount [--at PATH] [--port N] [--no-open]"
+      echo "  default mountpoint: \$HOME/GoPro-Camera"
+      exit 0 ;;
+    *) echo "unknown option: $1" >&2; exit 2 ;;
+  esac
+done
+
+if mount | grep -q " on ${MOUNTPOINT} (webdav"; then
+  echo "Already mounted at ${MOUNTPOINT}"
+  [ "$OPEN_FINDER" = 1 ] && open "$MOUNTPOINT"
+  exit 0
+fi
+
+# 1. Confirm a camera is actually there, and say which one.
+INFO="$(python3 "$HERE/gopro_probe.py")" || exit 1
+echo "$INFO"
+
+# 2. Start the WebDAV bridge if it isn't already listening.
+if ! nc -z 127.0.0.1 "$PORT" 2>/dev/null; then
+  mkdir -p "$(dirname "$LOG")"
+  nohup python3 "$HERE/gopro_webdavd.py" --port "$PORT" >>"$LOG" 2>&1 &
+  echo $! > "$PIDFILE"
+  for _ in $(seq 1 40); do
+    nc -z 127.0.0.1 "$PORT" 2>/dev/null && break
+    sleep 0.25
+  done
+  if ! nc -z 127.0.0.1 "$PORT" 2>/dev/null; then
+    echo "Bridge failed to start; see $LOG" >&2
+    exit 1
+  fi
+fi
+
+# 3. Mount it.
+if [ ! -d "$MOUNTPOINT" ]; then
+  mkdir -p "$MOUNTPOINT" 2>/dev/null || sudo mkdir -p "$MOUNTPOINT"
+  [ -w "$MOUNTPOINT" ] || sudo chown "$(id -u):$(id -g)" "$MOUNTPOINT"
+fi
+
+/sbin/mount_webdav -S -v "GoPro" "http://127.0.0.1:${PORT}/" "$MOUNTPOINT"
+
+# 4. Confirm, and show what's on the card.
+sleep 1
+if mount | grep -q " on ${MOUNTPOINT} (webdav"; then
+  echo "Mounted read-only at ${MOUNTPOINT}"
+  find "$MOUNTPOINT" -type f -not -name '.*' -not -name '._*' 2>/dev/null | head -20 | sed 's|^|  |'
+  [ "$OPEN_FINDER" = 1 ] && open "$MOUNTPOINT"
+else
+  echo "Mount did not appear; see $LOG" >&2
+  exit 1
+fi

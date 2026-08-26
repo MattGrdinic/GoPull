@@ -171,8 +171,58 @@ struct OverlayEditorView: View {
                 Text("Drag the gauge or the map on the preview to move it.")
                     .font(.caption2).foregroundStyle(.tertiary)
                     .fixedSize(horizontal: false, vertical: true)
+
+                Divider()
+                exportSection
             }
             .padding(16)
+        }
+    }
+
+    @ViewBuilder
+    private var exportSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Export").font(.caption).foregroundStyle(.secondary)
+
+            Picker("Size", selection: $model.exportOptions.size) {
+                ForEach(ExportOptions.Size.allCases) { Text($0.label).tag($0) }
+            }
+            Toggle("Include audio", isOn: $model.exportOptions.includesAudio)
+            Text(model.exportSummary)
+                .font(.caption2.monospacedDigit()).foregroundStyle(.tertiary)
+
+            if let progress = model.exportProgress {
+                ProgressView(value: progress.fraction)
+                HStack {
+                    Text("\(Int(progress.fraction * 100))%")
+                    Spacer()
+                    Text(String(format: "%.0f fps", progress.framesPerSecond)).monospacedDigit()
+                }
+                .font(.caption2).foregroundStyle(.secondary)
+                Button("Cancel Export") { model.cancelExport() }
+            } else {
+                Button {
+                    model.export()
+                } label: {
+                    Label("Burn In and Export", systemImage: "square.and.arrow.down.on.square")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(!model.track.hasFix)
+            }
+
+            if let exported = model.exportedTo {
+                HStack(spacing: 6) {
+                    Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                    Button(exported.lastPathComponent) { model.revealExport() }
+                        .buttonStyle(.link).lineLimit(1).truncationMode(.middle)
+                }
+                .font(.caption2)
+            }
+            if let error = model.exportError {
+                Text(error).font(.caption2).foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 

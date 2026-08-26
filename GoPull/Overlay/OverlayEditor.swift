@@ -10,6 +10,7 @@
 //
 
 import AVFoundation
+import AppKit
 import Combine
 import CoreGraphics
 import SwiftUI
@@ -33,6 +34,13 @@ final class OverlayEditorModel: ObservableObject {
     /// Which overlay a drag is moving.
     enum Handle { case gauge, map }
     @Published var dragging: Handle?
+
+    @Published var exportOptions = ExportOptions()
+    @Published private(set) var exportProgress: ExportProgress?
+    @Published private(set) var exportedTo: URL?
+    @Published var exportError: String?
+    let exporter = OverlayExporter()
+    private var exportTask: Task<Void, Never>?
 
     private let url: URL
     private var raw = TelemetryTrack()
@@ -163,6 +171,69 @@ final class OverlayEditorModel: ObservableObject {
     func endDrag() { dragging = nil }
 
     var aspect: Double { frameSize.height > 0 ? frameSize.width / frameSize.height : 16.0 / 9.0 }
+
+    // MARK: - Export
+
+    var isExporting: Bool { exportTask != nil }
+
+    /// Where a burned-in copy goes: beside the original, so it is obvious which
+    /// clip it came from and the original is never touched.
+    var exportDestination: URL {
+        let base = url.deletingPathExtension().lastPathComponent
+        return url.deletingLastPathComponent()
+            .appendingPathComponent("\(base) — overlay.mp4")
+    }
+
+    func export() {
+        guard exportTask == nil, track.hasFix else { return }
+        exportError = nil
+        exportedTo = nil
+        let destination = exportDestination
+        let settings = self.settings
+        let options = exportOptions
+        let track = self.track
+        let clip = url
+
+        exportTask = Task { [weak self] in
+            guard let self else { return }
+            let ticker = Task { @MainActor [weak self] in
+                while let self, self.exporter.isRunning {
+                    self.exportProgress = self.exporter.progress
+                    try? await Task.sleep(nanoseconds: 200_000_000)
+                }
+            }
+            do {
+                try await self.exporter.export(clip: clip, to: destination, track: track,
+                                               settings: settings, options: options)
+                self.exportedTo = destination
+            } catch is CancellationError {
+                try? FileManager.default.removeItem(at: destination)
+            } catch {
+                // A cancelled export leaves a partial file, which is worse than
+                // no file: it looks like a finished export that is simply short.
+                try? FileManager.default.removeItem(at: destination)
+                self.exportError = error.localizedDescription
+            }
+            ticker.cancel()
+            self.exportProgress = nil
+            self.exportTask = nil
+        }
+    }
+
+    func cancelExport() {
+        exportTask?.cancel()
+    }
+
+    func revealExport() {
+        guard let exportedTo else { return }
+        NSWorkspace.shared.activateFileViewerSelecting([exportedTo])
+    }
+
+    /// What the export will produce, so the size is known before it starts.
+    var exportSummary: String {
+        let output = exportOptions.size.output(for: frameSize)
+        return "\(Int(output.width))×\(Int(output.height)) · \(exportOptions.codec == .hevc ? "HEVC" : "H.264")"
+    }
 
     var summary: String {
         guard raw.hasFix else { return "" }

@@ -38,9 +38,14 @@ enum GaugeRenderer {
         context.saveGState()
         defer { context.restoreGState() }
 
+        // Clip to the gauge before setting a shadow: a shadow on an unclipped
+        // 4K context makes Core Graphics consider the whole frame.
+        let blur = rect.width * 0.05
+        context.clip(to: rect.insetBy(dx: -blur * 3, dy: -blur * 3))
+
         if config.style.shadow > 0 {
             context.setShadow(offset: CGSize(width: 0, height: -rect.width * 0.012),
-                              blur: rect.width * 0.05,
+                              blur: blur,
                               color: CGColor(srgbRed: 0, green: 0, blue: 0,
                                              alpha: config.style.shadow))
         }

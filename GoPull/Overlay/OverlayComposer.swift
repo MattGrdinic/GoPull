@@ -21,7 +21,8 @@ enum OverlayComposer {
     /// cheaper than doing it per frame, and export renders thousands of frames.
     static func draw(in context: CGContext, frameSize: CGSize,
                      track: TelemetryTrack, at time: Double,
-                     settings: OverlaySettings, maxSpeed: Double) {
+                     settings: OverlaySettings, maxSpeed: Double,
+                     projection: RouteProjection? = nil) {
 
         let sample = track.sample(at: time)
 
@@ -39,7 +40,8 @@ enum OverlayComposer {
             if points.count > 1 {
                 MapRenderer.draw(route: points.map(\.coordinate),
                                  progress: progress(in: points, at: time),
-                                 in: context, frameSize: frameSize, config: settings.map)
+                                 in: context, frameSize: frameSize, config: settings.map,
+                                 projection: projection)
             }
         }
     }

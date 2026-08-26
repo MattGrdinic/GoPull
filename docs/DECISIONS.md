@@ -447,16 +447,25 @@ which is the app's main job. Three spellings, all tried against the running app:
 |---|---|---|
 | `.onTapGesture(count: 2)` | **broken** | works |
 | `.contentShape` + `.simultaneousGesture` | **broken** | works |
-| `.simultaneousGesture` alone | works | only over real content |
-| a `Button` around the thumbnail | works | n/a — it is a click |
+| `.simultaneousGesture` alone | works, but only evenly on white space | only over real content |
+| **nothing** (the shipped answer) | works everywhere | n/a |
 
 A tap gesture on a row outranks the gesture `List(selection:)` relies on, and `contentShape`
-loses the click the same way by reshaping the row's hit area. A `Button` handles its own click
-and leaves selection alone, which is why the reliable path is a button rather than a cleverer
-gesture.
+loses the click the same way by reshaping the row's hit area.
 
-**It fails silently.** No warning, no crash, no visual difference — rows simply stop highlighting.
-Anything added to a row has to be checked by clicking one.
+`simultaneousGesture` alone looked like the answer and was not. A gesture's hit area is the row's
+**content**, so clicks on the name and thumbnail went through gesture arbitration while clicks on
+the empty space beside them went straight to the List. Half the row felt crisp and half did not —
+reported from use as "clicking the labels fails, clicking white areas works", which is exactly the
+shape of that hit area. It did not reproduce under synthesised clicks; real mouse input is
+arbitrated differently.
+
+So the row carries no gesture at all. Preview has three affordances that cost the row nothing: the
+thumbnail is a real `Button`, plus the Preview button and the context menu item.
+
+**It fails silently.** No warning, no crash, no visual difference — rows simply stop highlighting,
+or highlight only on part of their area. Anything added to a row has to be checked by clicking
+every region of one.
 
 ---
 

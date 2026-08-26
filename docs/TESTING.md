@@ -133,3 +133,4 @@ MISSION 1 PRO, firmware `H26.01.02.02.00`, over USB to an Apple Silicon Mac.
 | Click a thumbnail | preview opens, selection untouched |
 | "Publishing changes from within view updates" | 56 per 4 row clicks before, 0 after |
 | Import Selected end to end | inode changes, size matches, selection clears |
+| Click name / subtitle / date / size / white space | all select identically |

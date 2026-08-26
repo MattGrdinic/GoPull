@@ -193,23 +193,21 @@ struct ContentView: View {
                     .frame(width: 72, alignment: .trailing)
             }
             .padding(.vertical, 2)
-            // Selecting clips to import and double-clicking one to preview it
-            // compete for the same click, and two obvious spellings each break
-            // selection outright -- verified against the running app:
+            // No tap gesture on the row, deliberately. Every spelling of
+            // double-click-to-preview cost something, and the last one was the
+            // subtlest: a gesture's hit area is the row's *content*, so clicks
+            // on the name and thumbnail went through gesture arbitration while
+            // clicks on the empty space beside them went straight to the List.
+            // Half the row selected crisply and half did not.
             //
-            //   .onTapGesture(count: 2)          rows stop selecting entirely;
-            //                                    its gesture outranks the one
-            //                                    `List(selection:)` uses.
-            //   .contentShape + simultaneous     also stops rows selecting,
-            //                                    because reshaping the row's
-            //                                    hit area takes the click too.
+            //   .onTapGesture(count: 2)       rows stop selecting at all
+            //   .contentShape + simultaneous  rows stop selecting at all
+            //   .simultaneousGesture alone    selection works, but only the
+            //                                 white space feels responsive
             //
-            // `simultaneousGesture` alone leaves selection intact, at the cost
-            // of only being live over the row's actual content -- double-click
-            // works on the name, not on the empty space beside it. The reliable
-            // affordance is the thumbnail above, which is a real Button and so
-            // handles its own click without touching selection at all.
-            .simultaneousGesture(TapGesture(count: 2).onEnded { preview(file) })
+            // Preview has three affordances that cost the row nothing: the
+            // thumbnail is a real Button, plus the Preview button and the
+            // context menu item. So the row itself does exactly one thing.
             .contextMenu {
                 Button("Preview") { preview(file) }
                     .disabled(model.importer.isRunning || model.previewSource(for: file) == nil)

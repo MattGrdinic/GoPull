@@ -152,13 +152,15 @@ re-runs the update, which is what made clicking a second row feel slow or not hi
 which runs after the update. Measure it: `log show --predicate 'eventMessage CONTAINS "Publishing
 changes"'` — it must be 0.
 
-**Nothing that takes a click may sit on a `List` row.** Selecting clips to import and
-double-clicking one to preview compete for the same click. `.onTapGesture(count: 2)` on a row
-stops selection working entirely — its gesture outranks the one `List(selection:)` uses — and so
-does `.contentShape(Rectangle())`, which takes the click by reshaping the row's hit area.
-`.simultaneousGesture` alone is safe but only fires over the row's real content. Put anything
-clickable in an actual `Button` (as the thumbnail is) and selection is left alone. Verify against
-the running app: this breaks silently, with no warning and no crash.
+**No gestures on a `List` row — put clickable things in a `Button`.** Selecting clips and
+double-clicking one to preview compete for the same click. `.onTapGesture(count: 2)` stops
+selection entirely (it outranks the gesture `List(selection:)` uses), and so does
+`.contentShape(Rectangle())`. `.simultaneousGesture` alone keeps selection working but only over
+the row's *content*, so the name and thumbnail arbitrate the click while the white space beside
+them does not — half the row feels responsive and half does not. The row now carries no gesture;
+the thumbnail is a real `Button`, which handles its own click and leaves selection alone. All of
+this breaks silently, and none of it reproduces under synthesised clicks — check by clicking every
+region of a row by hand.
 
 **Preview traffic is import traffic.** Thumbnails and `/gopro/media/info` use the same control
 API that must stay untouched during an import, and playback would be a fifth stream. `PreviewStore`

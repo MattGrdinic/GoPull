@@ -10,6 +10,7 @@ struct ContentView: View {
     @EnvironmentObject private var model: AppModel
     @State private var choosingDestination = false
     @State private var previewing: MediaFile?
+    @State private var editingOverlays: MediaFile?
     /// Selection is owned by SwiftUI here, not read straight off the model.
     ///
     /// `List(selection:)` writes the new value back *while it is updating the
@@ -211,6 +212,8 @@ struct ContentView: View {
             .contextMenu {
                 Button("Preview") { preview(file) }
                     .disabled(model.importer.isRunning || model.previewSource(for: file) == nil)
+                Button("Overlays…") { editingOverlays = file }
+                    .disabled(model.importer.isRunning || model.importedURL(for: file) == nil)
             }
             .tag(file.id)
         }
@@ -225,6 +228,11 @@ struct ContentView: View {
             if let source = model.previewSource(for: file) {
                 ClipPreviewSheet(file: file, source: source,
                                  details: model.previews.details[file.id])
+            }
+        }
+        .sheet(item: $editingOverlays) { file in
+            if let url = model.importedURL(for: file) {
+                OverlayEditorView(file: file, url: url)
             }
         }
     }
@@ -254,6 +262,14 @@ struct ContentView: View {
         guard !model.importer.isRunning else { return nil }
         guard selection.count == 1, let id = selection.first else { return nil }
         return model.visibleFiles.first { $0.id == id && model.previewSource(for: $0) != nil }
+    }
+
+    /// Overlays are edited against the imported copy, so this stays nil until a
+    /// clip is actually on disk.
+    private var overlayTarget: MediaFile? {
+        guard !model.importer.isRunning else { return nil }
+        guard selection.count == 1, let id = selection.first else { return nil }
+        return model.visibleFiles.first { $0.id == id && model.importedURL(for: $0) != nil }
     }
 
     // MARK: - Footer
@@ -329,6 +345,16 @@ struct ContentView: View {
                     .disabled(previewTarget == nil)
                     .help("Play the camera's low-resolution proxy without copying anything. "
                           + "Double-clicking a clip does the same.")
+
+                    Button {
+                        if let target = overlayTarget { editingOverlays = target }
+                    } label: {
+                        Label("Overlays", systemImage: "speedometer")
+                    }
+                    .disabled(overlayTarget == nil)
+                    .help(overlayTarget == nil
+                          ? "Import a clip first — overlays are edited against the copy on disk."
+                          : "Position the speed gauge and route map on this clip.")
 
                     Button("Import Selected") { model.importSelected() }
                     .disabled(selection.isEmpty)

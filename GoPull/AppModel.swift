@@ -336,6 +336,19 @@ final class AppModel: ObservableObject {
         MediaPreview.source(for: file, among: files, cameraIP: cameraIP)
     }
 
+    /// The imported copy of a clip, when there is one.
+    ///
+    /// Overlays are edited against the pulled-down file rather than the camera:
+    /// the telemetry and the video have to come from the same place, and the
+    /// camera cannot be scrubbed frame by frame over USB.
+    func importedURL(for file: MediaFile) -> URL? {
+        let url = destinationURL(for: file)
+        guard let size = try? FileManager.default
+            .attributesOfItem(atPath: url.path)[.size] as? Int64, size == file.size
+        else { return nil }
+        return url
+    }
+
     /// True when this clip is already sitting in the destination at full size.
     func alreadyImported(_ file: MediaFile) -> Bool {
         guard let size = try? FileManager.default

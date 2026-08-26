@@ -35,9 +35,15 @@ final class OverlayEditorModel: ObservableObject {
     enum Handle { case gauge, map }
     @Published var dragging: Handle?
 
-    @Published var exportOptions = ExportOptions()
     /// Export itself lives on AppModel so it outlives this sheet.
     let app = AppModel.shared
+
+    /// Part of the preset, not a separate choice: what is set here is what a
+    /// batch run over a whole card will produce.
+    var exportOptions: ExportOptions {
+        get { settings.export }
+        set { settings.export = newValue }
+    }
 
     private let url: URL
     private var raw = TelemetryTrack()

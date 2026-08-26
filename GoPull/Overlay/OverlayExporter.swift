@@ -17,7 +17,7 @@ import Combine
 import CoreGraphics
 import Foundation
 
-struct ExportOptions: Equatable {
+struct ExportOptions: Equatable, Codable {
     enum Size: String, CaseIterable, Identifiable, Codable {
         case source, uhd4K, hd1080
 
@@ -84,9 +84,16 @@ struct ExportOptions: Equatable {
 
     var content: Content = .burnedIn
     var size: Size = .source
-    var codec: AVVideoCodecType = .hevc
+    /// Stored as its raw value: `AVVideoCodecType` is a RawRepresentable
+    /// struct, and Swift only synthesises Codable for RawRepresentable *enums*.
+    var codecRawValue: String = AVVideoCodecType.hevc.rawValue
     var includesAudio = true
     var destination: Destination = .newFile
+
+    var codec: AVVideoCodecType {
+        get { AVVideoCodecType(rawValue: codecRawValue) }
+        set { codecRawValue = newValue.rawValue }
+    }
 
     /// Alpha needs a codec that carries it. ProRes 4444 is the one every
     /// editor reads; HEVC's alpha support is far patchier.

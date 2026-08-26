@@ -61,6 +61,21 @@ final class AppModel: ObservableObject {
     @Published private(set) var overlayExportResult: URL?
     @Published var overlayExportError: String?
 
+    /// Run the saved overlay preset over each clip as it finishes importing.
+    @Published var overlaysAfterImport: Bool {
+        didSet { UserDefaults.standard.set(overlaysAfterImport, forKey: "overlaysAfterImport") }
+    }
+    /// Clips the user has turned overlays off for.
+    ///
+    /// Stored as the exceptions rather than the inclusions so a clip that has
+    /// never been considered is included by default -- the common case is a
+    /// card of one kind of footage, and the point of this is picking the few
+    /// that do not want a speedometer on them.
+    @Published private(set) var overlaysExcluded: Set<String> = []
+    @Published private(set) var overlayQueue: [MediaFile] = []
+    @Published private(set) var overlayQueueDone = 0
+    @Published private(set) var overlaySkipped: [String] = []
+
     var isConnected: Bool { info != nil }
 
     var totalBytes: Int64 { files.reduce(0) { $0 + $1.size } }
@@ -73,6 +88,7 @@ final class AppModel: ObservableObject {
             destination = URL(fileURLWithPath: NSHomeDirectory())
                 .appendingPathComponent("Movies/GoPro")
         }
+        overlaysAfterImport = defaults.object(forKey: "overlaysAfterImport") as? Bool ?? false
         organiseByDate = defaults.object(forKey: "organiseByDate") as? Bool ?? true
         separateByCamera = defaults.object(forKey: "separateByCamera") as? Bool ?? false
         includeSidecars = defaults.object(forKey: "includeSidecars") as? Bool ?? false
@@ -333,6 +349,103 @@ final class AppModel: ObservableObject {
 
     var isExportingOverlay: Bool { overlayExportTask != nil }
 
+    /// Whether a clip is a candidate for an overlay at all.
+    ///
+    /// Stills and proxies have nothing to put one on; whether a clip actually
+    /// carries GPS is only knowable once it is on disk, so that is checked when
+    /// its turn comes rather than here.
+    func canOverlay(_ file: MediaFile) -> Bool {
+        !file.isSidecar && MediaPreview.isVideo(file)
+    }
+
+    func overlaysEnabled(for file: MediaFile) -> Bool {
+        canOverlay(file) && !overlaysExcluded.contains(file.id)
+    }
+
+    func setOverlaysEnabled(_ enabled: Bool, for file: MediaFile) {
+        if enabled { overlaysExcluded.remove(file.id) }
+        else { overlaysExcluded.insert(file.id) }
+    }
+
+    /// Turn overlays on or off for everything currently listed.
+    func setOverlaysEnabledForAll(_ enabled: Bool) {
+        for file in visibleFiles where canOverlay(file) {
+            setOverlaysEnabled(enabled, for: file)
+        }
+    }
+
+    var overlayEligibleCount: Int { visibleFiles.filter { overlaysEnabled(for: $0) }.count }
+
+    /// What the saved preset would produce, so the checkbox is not a leap of
+    /// faith about settings last touched days ago.
+    var overlayPresetSummary: String { OverlaySettings.load().summary }
+
+    // MARK: - Batch
+
+    var isRunningOverlayQueue: Bool { !overlayQueue.isEmpty }
+
+    /// Queues the saved preset against each clip that is on disk and not opted
+    /// out of.
+    func queueOverlays(for files: [MediaFile]) {
+        let wanted = files.filter { overlaysEnabled(for: $0) && importedURL(for: $0) != nil }
+        guard !wanted.isEmpty else { return }
+        overlaySkipped = []
+        overlayQueueDone = 0
+        overlayQueue = wanted
+        runNextOverlay()
+    }
+
+    func cancelOverlayQueue() {
+        overlayQueue = []
+        cancelOverlayExport()
+    }
+
+    private func runNextOverlay() {
+        guard !overlayQueue.isEmpty else { return }
+        guard overlayExportTask == nil else { return }
+        let file = overlayQueue[0]
+        guard let clip = importedURL(for: file) else {
+            overlayQueue.removeFirst()
+            runNextOverlay()
+            return
+        }
+
+        let settings = OverlaySettings.load()
+        Task { [weak self] in
+            guard let self else { return }
+            // Telemetry is only knowable from the file, so a clip with no fixes
+            // is skipped here rather than failing the whole run.
+            let raw = try? TelemetryReader.read(clip)
+            guard let raw, raw.hasFix else {
+                self.overlaySkipped.append(file.name)
+                self.overlayQueue.removeFirst()
+                self.overlayQueueDone += 1
+                self.runNextOverlay()
+                return
+            }
+            let track = raw.smoothed(settings.gauge.smoothing)
+            let destination = Self.overlayDestination(for: clip, settings: settings)
+            self.startOverlayExport(clip: clip, to: destination, track: track,
+                                    settings: settings, options: settings.export)
+            await self.overlayExportTask?.value
+            if !self.overlayQueue.isEmpty { self.overlayQueue.removeFirst() }
+            self.overlayQueueDone += 1
+            self.runNextOverlay()
+        }
+    }
+
+    /// Where a batch overlay is written. Matches what the editor does.
+    static func overlayDestination(for clip: URL, settings: OverlaySettings) -> URL {
+        if settings.export.content == .burnedIn,
+           settings.export.destination == .replaceOriginal {
+            return clip
+        }
+        let base = clip.deletingPathExtension().lastPathComponent
+        let suffix = settings.export.content == .overlayOnly ? "overlay-alpha" : "overlay"
+        return clip.deletingLastPathComponent()
+            .appendingPathComponent("\(base) — \(suffix).\(settings.export.fileExtension)")
+    }
+
     func startOverlayExport(clip: URL, to destination: URL, track: TelemetryTrack,
                             settings: OverlaySettings, options: ExportOptions) {
         guard overlayExportTask == nil else { return }
@@ -483,6 +596,14 @@ final class AppModel: ObservableObject {
             errorMessage = "\(failures.count) file(s) failed: \(names)"
         }
         if !Task.isCancelled { await refresh() }
+
+        // Overlays run after the copy, not during it: both want the disk and
+        // the CPU, and an import that is already the long pole should not be
+        // made longer.
+        if overlaysAfterImport, !Task.isCancelled {
+            let done = chosen.filter { file in !failures.contains { $0.0.id == file.id } }
+            queueOverlays(for: done)
+        }
     }
 }
 

@@ -197,7 +197,7 @@ struct OverlayEditorView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Export").font(.caption).foregroundStyle(.secondary)
 
-            Picker("Contents", selection: $model.exportOptions.content) {
+            Picker("Contents", selection: $model.settings.export.content) {
                 ForEach(ExportOptions.Content.allCases) { Text($0.label).tag($0) }
             }
             if model.exportOptions.content == .overlayOnly {
@@ -209,7 +209,7 @@ struct OverlayEditorView: View {
             }
 
             if model.exportOptions.content == .burnedIn {
-                Picker("Write to", selection: $model.exportOptions.destination) {
+                Picker("Write to", selection: $model.settings.export.destination) {
                     ForEach(ExportOptions.Destination.allCases) { Text($0.label).tag($0) }
                 }
             }
@@ -226,11 +226,11 @@ struct OverlayEditorView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            Picker("Size", selection: $model.exportOptions.size) {
+            Picker("Size", selection: $model.settings.export.size) {
                 ForEach(ExportOptions.Size.allCases) { Text($0.label).tag($0) }
             }
             if model.exportOptions.content == .burnedIn {
-                Toggle("Include audio", isOn: $model.exportOptions.includesAudio)
+                Toggle("Include audio", isOn: $model.settings.export.includesAudio)
             }
             Text(model.exportSummary)
                 .font(.caption2.monospacedDigit()).foregroundStyle(.tertiary)

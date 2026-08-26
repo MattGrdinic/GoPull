@@ -16,6 +16,10 @@ struct OverlaySettings: Equatable, Codable {
     var gauge = GaugeConfig()
     var showsMap = true
     var map = MapConfig()
+    /// How the overlays get written out, kept with the look rather than beside
+    /// it: "my preset" means burned-in-at-4K just as much as it means Hi-Tech.
+    /// It is what a batch run over a card uses.
+    var export = ExportOptions()
 
     /// Applying a preset moves both overlays together, which is what the
     /// preset names mean -- "Classic" is a look for the whole overlay, not for
@@ -47,6 +51,17 @@ struct OverlaySettings: Equatable, Codable {
               let decoded = try? JSONDecoder().decode(OverlaySettings.self, from: data)
         else { return .defaults }
         return decoded
+    }
+
+    /// A one-line description of what this preset would produce.
+    var summary: String {
+        var parts: [String] = []
+        if let preset = commonPreset { parts.append(preset.label) }
+        if showsGauge { parts.append(gauge.kind.label.lowercased()) }
+        if showsMap { parts.append("map") }
+        parts.append(export.content == .overlayOnly ? "alpha" : "burned in")
+        if export.size != .source { parts.append(export.size.label) }
+        return parts.joined(separator: " · ")
     }
 
     func save() {

@@ -159,6 +159,20 @@ struct ContentView: View {
                     .foregroundStyle(model.alreadyImported(file) ? .green : .secondary)
                     .help(model.alreadyImported(file) ? "Already imported" : "Not imported yet")
 
+                // Which clips want a speedometer on them. On by default, so a
+                // card of one kind of footage needs no attention; the point is
+                // turning it off for the few that do not.
+                Toggle("", isOn: Binding(
+                    get: { model.overlaysEnabled(for: file) },
+                    set: { model.setOverlaysEnabled($0, for: file) }))
+                    .toggleStyle(.checkbox)
+                    .labelsHidden()
+                    .disabled(!model.canOverlay(file))
+                    .opacity(model.canOverlay(file) ? 1 : 0.25)
+                    .help(model.canOverlay(file)
+                          ? "Give this clip an overlay when overlays are generated"
+                          : "Overlays only apply to video")
+
                 Button { preview(file) } label: { ClipThumbnail(file: file) }
                     .buttonStyle(.plain)
                     .disabled(model.importer.isRunning
@@ -214,6 +228,15 @@ struct ContentView: View {
                     .disabled(model.importer.isRunning || model.previewSource(for: file) == nil)
                 Button("Overlays…") { editingOverlays = file }
                     .disabled(model.importer.isRunning || model.importedURL(for: file) == nil)
+                Divider()
+                Button("Tick All for Overlays") { model.setOverlaysEnabledForAll(true) }
+                Button("Untick All") { model.setOverlaysEnabledForAll(false) }
+                Divider()
+                Button("Generate Overlays for Selection") {
+                    model.queueOverlays(for: model.visibleFiles.filter { selection.contains($0.id) })
+                }
+                .disabled(model.isRunningOverlayQueue || model.overlayExporter.isRunning
+                          || selection.isEmpty)
             }
             .tag(file.id)
         }
@@ -282,7 +305,7 @@ struct ContentView: View {
             // A burn-in outlives the editor sheet, so it reports here too --
             // otherwise closing that sheet leaves it running with nothing to
             // show for it, and a part-written file that looks like a failure.
-            if model.overlayExporter.isRunning {
+            if model.overlayExporter.isRunning || model.isRunningOverlayQueue {
                 overlayExportProgress
             } else if let exported = model.overlayExportResult {
                 overlayExportFinished(exported)
@@ -319,6 +342,18 @@ struct ContentView: View {
                         .toggleStyle(.checkbox)
                         .help("Include .LRV/.LRF proxies and thumbnails in the list. "
                               + "They are always visible on the mounted drive.")
+
+                    HStack(spacing: 6) {
+                        Toggle("Overlays after import", isOn: $model.overlaysAfterImport)
+                            .toggleStyle(.checkbox)
+                            .help("Run the saved overlay preset over each ticked clip "
+                                  + "once it has copied across.")
+                        if model.overlaysAfterImport {
+                            Text("\(model.overlayEligibleCount) ticked · \(model.overlayPresetSummary)")
+                                .font(.caption2).foregroundStyle(.tertiary)
+                                .lineLimit(1)
+                        }
+                    }
 
                     HStack(spacing: 6) {
                         Toggle("Device folders", isOn: $model.separateByCamera)
@@ -390,18 +425,27 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 4) {
             ProgressView(value: model.overlayExporter.progress.fraction)
             HStack {
-                Label("Burning in overlays — \(model.overlayExporter.clipName ?? "")",
-                      systemImage: "speedometer")
+                Label(queueLabel, systemImage: "speedometer")
                     .lineLimit(1).truncationMode(.middle)
                 Spacer()
                 Text(String(format: "%.0f fps", model.overlayExporter.progress.framesPerSecond))
                     .monospacedDigit()
-                Button("Cancel") { model.cancelOverlayExport() }
-                    .buttonStyle(.link)
+                Button("Cancel") {
+                    model.isRunningOverlayQueue ? model.cancelOverlayQueue()
+                                                : model.cancelOverlayExport()
+                }
+                .buttonStyle(.link)
             }
             .font(.caption)
             .foregroundStyle(.secondary)
         }
+    }
+
+    private var queueLabel: String {
+        let name = model.overlayExporter.clipName ?? ""
+        guard model.isRunningOverlayQueue else { return "Overlay — \(name)" }
+        let total = model.overlayQueueDone + model.overlayQueue.count
+        return "Overlay \(model.overlayQueueDone + 1) of \(total) — \(name)"
     }
 
     private func overlayExportFinished(_ url: URL) -> some View {

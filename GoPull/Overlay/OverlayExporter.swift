@@ -68,10 +68,51 @@ struct ExportOptions: Equatable {
         }
     }
 
+    /// What the export contains.
+    enum Content: String, CaseIterable, Identifiable, Codable {
+        /// The footage with the overlays drawn onto it.
+        case burnedIn
+        /// The overlays alone on transparency, to lay over the original in an
+        /// editor. Nothing of the source is decoded, so it is far quicker.
+        case overlayOnly
+
+        var id: String { rawValue }
+        var label: String {
+            self == .burnedIn ? "Burned in" : "Overlay only (alpha)"
+        }
+    }
+
+    var content: Content = .burnedIn
     var size: Size = .source
     var codec: AVVideoCodecType = .hevc
     var includesAudio = true
     var destination: Destination = .newFile
+
+    /// Alpha needs a codec that carries it. ProRes 4444 is the one every
+    /// editor reads; HEVC's alpha support is far patchier.
+    var effectiveCodec: AVVideoCodecType {
+        content == .overlayOnly ? .proRes4444 : codec
+    }
+
+    /// An overlay track is laid over the original, which already has the sound.
+    var writesAudio: Bool { includesAudio && content == .burnedIn }
+
+    /// ProRes belongs in QuickTime; MP4 is not a container for it.
+    var fileType: AVFileType { content == .overlayOnly ? .mov : .mp4 }
+    var fileExtension: String { content == .overlayOnly ? "mov" : "mp4" }
+}
+
+/// AVFoundation's `localizedDescription` is often just "The operation could not
+/// be completed"; the reason it fails is in the underlying error.
+private func detail(_ error: Error?) -> String {
+    guard let error = error as NSError? else { return "unknown" }
+    var parts = [error.localizedDescription]
+    if let reason = error.localizedFailureReason { parts.append(reason) }
+    if let underlying = error.userInfo[NSUnderlyingErrorKey] as? NSError {
+        parts.append("(\(underlying.domain) \(underlying.code): \(underlying.localizedDescription))")
+    }
+    parts.append("[\(error.domain) \(error.code)]")
+    return parts.joined(separator: " ")
 }
 
 enum ExportError: LocalizedError {
@@ -167,20 +208,36 @@ final class OverlayExporter: ObservableObject {
         try? FileManager.default.removeItem(at: writeTo)
 
         let reader = try AVAssetReader(asset: asset)
-        let writer = try AVAssetWriter(outputURL: writeTo, fileType: .mp4)
+        let writer = try AVAssetWriter(outputURL: writeTo, fileType: options.fileType)
 
-        // BGRA out of the decoder so a CGContext can be wrapped straight around
-        // each frame. It costs a colour conversion, and it is the only format
-        // Core Graphics can draw into without a second copy.
-        let videoOutput = AVAssetReaderTrackOutput(
-            track: video,
-            outputSettings: [kCVPixelBufferPixelFormatTypeKey as String:
-                                kCVPixelFormatType_32BGRA])
-        videoOutput.alwaysCopiesSampleData = false
-        reader.add(videoOutput)
+        // An overlay-only export never touches the source's pixels, so it does
+        // not read the video track at all -- it generates frames on the track's
+        // own cadence.
+        //
+        // Reading the track in passthrough to borrow its timestamps looked
+        // cheaper and is not usable: the first two samples of these clips both
+        // report a presentation time of 0.000, and a writer rejects a repeated
+        // timestamp (AVFoundation -11800 / OSStatus -16364, which says none of
+        // that).
+        let overlayOnly = options.content == .overlayOnly
+        let frameDuration = try await video.load(.minFrameDuration)
+        let step = frameDuration.isValid && frameDuration.seconds > 0
+            ? frameDuration
+            : CMTime(value: 1001, timescale: 30000)
+
+        var videoOutput: AVAssetReaderTrackOutput?
+        if !overlayOnly {
+            let output = AVAssetReaderTrackOutput(
+                track: video,
+                outputSettings: [kCVPixelBufferPixelFormatTypeKey as String:
+                                    kCVPixelFormatType_32BGRA])
+            output.alwaysCopiesSampleData = false
+            reader.add(output)
+            videoOutput = output
+        }
 
         let videoInput = AVAssetWriterInput(mediaType: .video, outputSettings: [
-            AVVideoCodecKey: options.codec,
+            AVVideoCodecKey: options.effectiveCodec,
             AVVideoWidthKey: Int(outputSize.width),
             AVVideoHeightKey: Int(outputSize.height),
         ])
@@ -198,7 +255,7 @@ final class OverlayExporter: ObservableObject {
         // Audio is copied, not re-encoded: nothing here touches it.
         var audioOutput: AVAssetReaderTrackOutput?
         var audioInput: AVAssetWriterInput?
-        if options.includesAudio,
+        if options.writesAudio,
            let audio = try await asset.loadTracks(withMediaType: .audio).first {
             let output = AVAssetReaderTrackOutput(track: audio, outputSettings: nil)
             output.alwaysCopiesSampleData = false
@@ -214,16 +271,18 @@ final class OverlayExporter: ObservableObject {
             audioInput = input
         }
 
-        guard reader.startReading() else {
-            throw ExportError.failed(reader.error?.localizedDescription ?? "could not read")
+        // The reader is only needed when something is being read from the clip.
+        if (!overlayOnly || options.writesAudio), !reader.startReading() {
+            throw ExportError.failed(detail(reader.error))
         }
         guard writer.startWriting() else {
-            throw ExportError.cannotWrite(writer.error?.localizedDescription ?? "unknown")
+            throw ExportError.cannotWrite(detail(writer.error))
         }
         writer.startSession(atSourceTime: .zero)
 
         let started = Date()
         let space = CGColorSpace(name: CGColorSpace.sRGB)!
+        let overlayFrames = max(Int((duration / step.seconds).rounded()), 1)
 
         // The two tracks are pumped on their own queues; video is what takes the
         // time, and audio must not be blocked behind it.
@@ -239,13 +298,25 @@ final class OverlayExporter: ObservableObject {
                         continuation.resume(throwing: ExportError.cancelled)
                         return
                     }
-                    guard let sample = videoOutput.copyNextSampleBuffer(),
-                          let source = CMSampleBufferGetImageBuffer(sample) else {
-                        videoInput.markAsFinished()
-                        continuation.resume()
-                        return
+                    var source: CVPixelBuffer?
+                    let time: CMTime
+                    if overlayOnly {
+                        guard written < overlayFrames else {
+                            videoInput.markAsFinished()
+                            continuation.resume()
+                            return
+                        }
+                        time = CMTimeMultiply(step, multiplier: Int32(written))
+                    } else {
+                        guard let sample = videoOutput?.copyNextSampleBuffer() else {
+                            videoInput.markAsFinished()
+                            continuation.resume()
+                            return
+                        }
+                        guard let image = CMSampleBufferGetImageBuffer(sample) else { continue }
+                        source = image
+                        time = CMSampleBufferGetPresentationTimeStamp(sample)
                     }
-                    let time = CMSampleBufferGetPresentationTimeStamp(sample)
                     guard let pool = adaptor.pixelBufferPool else {
                         continuation.resume(throwing: ExportError.cannotWrite("no buffer pool"))
                         return
@@ -264,7 +335,7 @@ final class OverlayExporter: ObservableObject {
 
                     if !adaptor.append(target, withPresentationTime: time) {
                         continuation.resume(throwing: ExportError.cannotWrite(
-                            writer.error?.localizedDescription ?? "append failed"))
+                            detail(writer.error)))
                         return
                     }
                     written += 1
@@ -284,7 +355,7 @@ final class OverlayExporter: ObservableObject {
 
         if writer.status == .failed {
             try? FileManager.default.removeItem(at: writeTo)
-            throw ExportError.cannotWrite(writer.error?.localizedDescription ?? "unknown")
+            throw ExportError.cannotWrite(detail(writer.error))
         }
 
         do {
@@ -337,15 +408,15 @@ final class OverlayExporter: ObservableObject {
     }
 
     /// Draws one frame, scaled if needed, with the overlays on top.
-    private nonisolated static func compose(source: CVPixelBuffer, into target: CVPixelBuffer,
+    private nonisolated static func compose(source: CVPixelBuffer?, into target: CVPixelBuffer,
                                             size: CGSize, colorSpace: CGColorSpace,
                                             track: TelemetryTrack, at time: Double,
                                             settings: OverlaySettings, maxSpeed: Double,
                                             projection: RouteProjection) {
         CVPixelBufferLockBaseAddress(target, [])
         defer { CVPixelBufferUnlockBaseAddress(target, []) }
-        CVPixelBufferLockBaseAddress(source, .readOnly)
-        defer { CVPixelBufferUnlockBaseAddress(source, .readOnly) }
+        if let source { CVPixelBufferLockBaseAddress(source, .readOnly) }
+        defer { if let source { CVPixelBufferUnlockBaseAddress(source, .readOnly) } }
 
         guard let base = CVPixelBufferGetBaseAddress(target),
               let context = CGContext(
@@ -358,6 +429,16 @@ final class OverlayExporter: ObservableObject {
                 bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue
                           | CGBitmapInfo.byteOrder32Little.rawValue)
         else { return }
+
+        guard let source else {
+            // Overlay only: start from transparency. Pool buffers are recycled,
+            // so the previous frame is still in them and must be cleared, or the
+            // overlay smears across the whole export.
+            memset(base, 0, CVPixelBufferGetBytesPerRow(target) * CVPixelBufferGetHeight(target))
+            OverlayComposer.draw(in: context, frameSize: size, track: track, at: time,
+                                 settings: settings, maxSpeed: maxSpeed, projection: projection)
+            return
+        }
 
         let sourceWidth = CVPixelBufferGetWidth(source)
         let sourceHeight = CVPixelBufferGetHeight(source)

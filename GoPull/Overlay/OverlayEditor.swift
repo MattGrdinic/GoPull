@@ -176,12 +176,15 @@ final class OverlayEditorModel: ObservableObject {
     /// Where a burned-in copy goes.
     var exportDestination: URL {
         switch exportOptions.destination {
-        case .replaceOriginal:
+        case .replaceOriginal where exportOptions.content == .burnedIn:
             return url
+        case .replaceOriginal:
+            fallthrough
         case .newFile:
             let base = url.deletingPathExtension().lastPathComponent
+            let suffix = exportOptions.content == .overlayOnly ? "overlay-alpha" : "overlay"
             return url.deletingLastPathComponent()
-                .appendingPathComponent("\(base) — overlay.mp4")
+                .appendingPathComponent("\(base) — \(suffix).\(exportOptions.fileExtension)")
         }
     }
 
@@ -214,7 +217,21 @@ final class OverlayEditorModel: ObservableObject {
     /// What the export will produce, so the size is known before it starts.
     var exportSummary: String {
         let output = exportOptions.size.output(for: frameSize)
-        return "\(Int(output.width))×\(Int(output.height)) · \(exportOptions.codec == .hevc ? "HEVC" : "H.264")"
+        let codec = exportOptions.content == .overlayOnly
+            ? "ProRes 4444 · alpha"
+            : (exportOptions.codec == .hevc ? "HEVC" : "H.264")
+        return "\(Int(output.width))×\(Int(output.height)) · \(codec)"
+    }
+
+    /// ProRes is not a small format, and an overlay is mostly empty frame -- it
+    /// still costs what the resolution costs, so it is worth saying up front.
+    var exportSizeEstimate: String? {
+        guard exportOptions.content == .overlayOnly, duration > 0 else { return nil }
+        let output = exportOptions.size.output(for: frameSize)
+        // Measured: 1920x1080 ProRes 4444 lands near 7.2 MB per second.
+        let perSecond = 7.2e6 * (output.width * output.height) / (1920 * 1080)
+        let bytes = perSecond * duration
+        return "about \(Int64(bytes).byteLabel)"
     }
 
     var summary: String {

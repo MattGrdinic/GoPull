@@ -111,3 +111,56 @@ struct ExportDestinationTests {
         #expect(!OverlayExporter.replacingLosesTelemetry(missing))
     }
 }
+
+struct AlphaExportTests {
+
+    /// Alpha needs a codec that carries it; HEVC's support is patchy across
+    /// editors, ProRes 4444 is read everywhere.
+    @Test func overlayOnlyForcesProRes4444() {
+        var options = ExportOptions()
+        options.codec = .hevc
+        options.content = .overlayOnly
+        #expect(options.effectiveCodec == .proRes4444)
+
+        options.content = .burnedIn
+        #expect(options.effectiveCodec == .hevc)
+    }
+
+    /// ProRes belongs in QuickTime -- AVAssetWriter refuses to add it to MP4.
+    @Test func overlayOnlyWritesQuickTime() {
+        var options = ExportOptions()
+        options.content = .overlayOnly
+        #expect(options.fileType == .mov)
+        #expect(options.fileExtension == "mov")
+
+        options.content = .burnedIn
+        #expect(options.fileType == .mp4)
+        #expect(options.fileExtension == "mp4")
+    }
+
+    /// The overlay is laid over the original, which still has its own sound.
+    @Test func overlayOnlyWritesNoAudio() {
+        var options = ExportOptions()
+        options.includesAudio = true
+        options.content = .overlayOnly
+        #expect(!options.writesAudio)
+
+        options.content = .burnedIn
+        #expect(options.writesAudio)
+    }
+
+    @Test func burnedInIsStillTheDefault() {
+        #expect(ExportOptions().content == .burnedIn)
+    }
+
+    @Test func bothContentsAreOffered() {
+        #expect(ExportOptions.Content.allCases.count == 2)
+    }
+
+    @Test func contentSurvivesEncoding() throws {
+        for content in ExportOptions.Content.allCases {
+            let data = try JSONEncoder().encode(content)
+            #expect(try JSONDecoder().decode(ExportOptions.Content.self, from: data) == content)
+        }
+    }
+}

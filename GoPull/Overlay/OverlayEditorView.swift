@@ -197,8 +197,21 @@ struct OverlayEditorView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Export").font(.caption).foregroundStyle(.secondary)
 
-            Picker("Write to", selection: $model.exportOptions.destination) {
-                ForEach(ExportOptions.Destination.allCases) { Text($0.label).tag($0) }
+            Picker("Contents", selection: $model.exportOptions.content) {
+                ForEach(ExportOptions.Content.allCases) { Text($0.label).tag($0) }
+            }
+            if model.exportOptions.content == .overlayOnly {
+                Text("The overlays on transparency, to lay over the original in "
+                     + "an editor. The footage is never decoded, so this is much "
+                     + "quicker.")
+                    .font(.caption2).foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if model.exportOptions.content == .burnedIn {
+                Picker("Write to", selection: $model.exportOptions.destination) {
+                    ForEach(ExportOptions.Destination.allCases) { Text($0.label).tag($0) }
+                }
             }
             Text(model.exportDestination.lastPathComponent)
                 .font(.caption2).foregroundStyle(.tertiary)
@@ -216,9 +229,14 @@ struct OverlayEditorView: View {
             Picker("Size", selection: $model.exportOptions.size) {
                 ForEach(ExportOptions.Size.allCases) { Text($0.label).tag($0) }
             }
-            Toggle("Include audio", isOn: $model.exportOptions.includesAudio)
+            if model.exportOptions.content == .burnedIn {
+                Toggle("Include audio", isOn: $model.exportOptions.includesAudio)
+            }
             Text(model.exportSummary)
                 .font(.caption2.monospacedDigit()).foregroundStyle(.tertiary)
+            if let estimate = model.exportSizeEstimate {
+                Text(estimate).font(.caption2).foregroundStyle(.tertiary)
+            }
 
             if model.isExporting {
                 let progress = model.app.overlayExporter.progress
@@ -235,8 +253,10 @@ struct OverlayEditorView: View {
                 Button {
                     model.exportRequested()
                 } label: {
-                    Label(model.exportOptions.destination == .replaceOriginal
-                          ? "Burn In and Replace" : "Burn In and Export",
+                    Label(model.exportOptions.content == .overlayOnly
+                          ? "Export Overlay"
+                          : (model.exportOptions.destination == .replaceOriginal
+                             ? "Burn In and Replace" : "Burn In and Export"),
                           systemImage: "square.and.arrow.down.on.square")
                         .frame(maxWidth: .infinity)
                 }

@@ -10,6 +10,18 @@ struct ContentView: View {
     @EnvironmentObject private var model: AppModel
     @State private var choosingDestination = false
     @State private var previewing: MediaFile?
+    /// Selection is owned by SwiftUI here, not read straight off the model.
+    ///
+    /// `List(selection:)` writes the new value back *while it is updating the
+    /// rows*. Pointed at a `@Published` property that means `objectWillChange`
+    /// fires mid-update -- "Publishing changes from within view updates is not
+    /// allowed, this will cause undefined behavior", 14 times per click on a
+    /// 12-row list. SwiftUI then re-runs the update, which is what made
+    /// clicking a second row feel slow or fail to highlight at all.
+    ///
+    /// The model is still the source of truth for everything else; the two are
+    /// mirrored below, in `onChange`, which runs *after* the update completes.
+    @State private var selection: Set<String> = []
 
     var body: some View {
         VStack(spacing: 0) {
@@ -139,7 +151,7 @@ struct ContentView: View {
     // MARK: - Files
 
     private var fileList: some View {
-        List(model.visibleFiles, selection: $model.selection) { file in
+        List(model.visibleFiles, selection: $selection) { file in
             HStack(spacing: 10) {
                 Image(systemName: model.alreadyImported(file)
                       ? "checkmark.circle.fill" : "circle.dashed")
@@ -205,6 +217,12 @@ struct ContentView: View {
             .tag(file.id)
         }
         .listStyle(.inset)
+        .onChange(of: selection) { _, new in
+            if model.selection != new { model.selection = new }
+        }
+        .onChange(of: model.selection) { _, new in
+            if selection != new { selection = new }
+        }
         .sheet(item: $previewing) { file in
             if let source = model.previewSource(for: file) {
                 ClipPreviewSheet(file: file, source: source,
@@ -236,7 +254,7 @@ struct ContentView: View {
     /// single clip, so the button matches what the list is showing as chosen.
     private var previewTarget: MediaFile? {
         guard !model.importer.isRunning else { return nil }
-        guard model.selection.count == 1, let id = model.selection.first else { return nil }
+        guard selection.count == 1, let id = selection.first else { return nil }
         return model.visibleFiles.first { $0.id == id && model.previewSource(for: $0) != nil }
     }
 
@@ -315,7 +333,7 @@ struct ContentView: View {
                           + "Double-clicking a clip does the same.")
 
                     Button("Import Selected") { model.importSelected() }
-                    .disabled(model.selection.isEmpty)
+                    .disabled(selection.isEmpty)
 
                     Button {
                         model.importNew()

@@ -131,3 +131,5 @@ MISSION 1 PRO, firmware `H26.01.02.02.00`, over USB to an Apple Silicon Mac.
 | Row selection with a double-click gesture | broken by `onTapGesture`, and by `contentShape` + `simultaneousGesture` |
 | Click row, cmd-click a second | both select; Import Selected enabled, Preview disabled |
 | Click a thumbnail | preview opens, selection untouched |
+| "Publishing changes from within view updates" | 56 per 4 row clicks before, 0 after |
+| Import Selected end to end | inode changes, size matches, selection clears |

@@ -144,6 +144,14 @@ so SwiftUI's `VideoPlayer` crashes on first render with `SIGABRT` in `getSupercl
 `PreviewWindow.swift` wraps `AVPlayerView` directly, which is a hard symbol reference and pulls
 AVKit in. Check `otool -L` before suspecting SwiftUI.
 
+**Never bind a `@Published` property to `List(selection:)`.** The List writes the new value back
+*while it is updating rows*, so `objectWillChange` fires mid-update: "Publishing changes from
+within view updates is not allowed" — 14 times per click on a 12-row list, and SwiftUI then
+re-runs the update, which is what made clicking a second row feel slow or not highlight at all.
+`ContentView` keeps selection in `@State` and mirrors it to `AppModel.selection` in `onChange`,
+which runs after the update. Measure it: `log show --predicate 'eventMessage CONTAINS "Publishing
+changes"'` — it must be 0.
+
 **Nothing that takes a click may sit on a `List` row.** Selecting clips to import and
 double-clicking one to preview compete for the same click. `.onTapGesture(count: 2)` on a row
 stops selection working entirely — its gesture outranks the one `List(selection:)` uses — and so

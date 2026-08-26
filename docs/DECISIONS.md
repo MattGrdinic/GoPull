@@ -457,3 +457,42 @@ gesture.
 
 **It fails silently.** No warning, no crash, no visual difference — rows simply stop highlighting.
 Anything added to a row has to be checked by clicking one.
+
+---
+
+## 26. Selection lives in `@State`, mirrored to the model
+
+**Decision.** `ContentView` owns `@State private var selection`, binds *that* to
+`List(selection:)`, and mirrors it to `AppModel.selection` in `onChange`. The model stays the
+source of truth for importing; it just is not what the List writes into directly.
+
+**The bug.** Clicking a row logged *"Publishing changes from within view updates is not allowed,
+this will cause undefined behavior"* — **14 times per click** on a 12-row list. Selecting a second
+row was slow, or the row never highlighted.
+
+`List(selection:)` writes the new selection back through the binding *during* its update pass.
+Pointed at `@Published var selection`, that fires `objectWillChange` mid-update, SwiftUI discards
+and re-runs the update, and the result is the lag.
+
+**It was not the preview feature**, though it surfaced alongside it. Building the commit *before*
+preview existed and clicking rows produced the same warnings, which is the check worth doing
+before rewriting the thing you touched last.
+
+**Measured, on the same four clicks:**
+
+| | warnings |
+|---|---|
+| `List(selection: $model.selection)` | 56 |
+| `@State` + `onChange` mirror | **0** |
+
+`onChange` runs after the update completes, so the model write is no longer inside it.
+
+**Verifying this needs the log, not the console.** SwiftUI runtime issues go to the unified log,
+not stderr:
+
+```bash
+log show --last 5m --predicate 'eventMessage CONTAINS "Publishing changes"' --style compact
+```
+
+Under Xcode the same warning can pause the app, which is why it looks far worse there than in a
+standalone run.

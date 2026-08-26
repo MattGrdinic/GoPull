@@ -23,8 +23,15 @@ struct OverlayEditorView: View {
             HStack(spacing: 0) {
                 preview
                 Divider()
-                controls
-                    .frame(width: 280)
+                VStack(spacing: 0) {
+                    controls
+                    Divider()
+                    // Pinned, not at the bottom of the scroll view: it was below
+                    // the fold with no visible scrollbar, so it read as missing.
+                    exportSection
+                        .padding(16)
+                }
+                .frame(width: 300)
             }
         }
         .frame(width: 1080, height: 700)
@@ -180,9 +187,6 @@ struct OverlayEditorView: View {
                 Text("Drag the gauge or the map on the preview to move it.")
                     .font(.caption2).foregroundStyle(.tertiary)
                     .fixedSize(horizontal: false, vertical: true)
-
-                Divider()
-                exportSection
             }
             .padding(16)
         }
@@ -216,7 +220,8 @@ struct OverlayEditorView: View {
             Text(model.exportSummary)
                 .font(.caption2.monospacedDigit()).foregroundStyle(.tertiary)
 
-            if let progress = model.exportProgress {
+            if model.isExporting {
+                let progress = model.app.overlayExporter.progress
                 ProgressView(value: progress.fraction)
                 HStack {
                     Text("\(Int(progress.fraction * 100))%")
@@ -225,6 +230,7 @@ struct OverlayEditorView: View {
                 }
                 .font(.caption2).foregroundStyle(.secondary)
                 Button("Cancel Export") { model.cancelExport() }
+                    .frame(maxWidth: .infinity)
             } else {
                 Button {
                     model.exportRequested()
@@ -238,7 +244,7 @@ struct OverlayEditorView: View {
                 .disabled(!model.track.hasFix)
             }
 
-            if let exported = model.exportedTo {
+            if let exported = model.app.overlayExportResult {
                 HStack(spacing: 6) {
                     Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
                     Button(exported.lastPathComponent) { model.revealExport() }
@@ -246,7 +252,7 @@ struct OverlayEditorView: View {
                 }
                 .font(.caption2)
             }
-            if let error = model.exportError {
+            if let error = model.app.overlayExportError {
                 Text(error).font(.caption2).foregroundStyle(.red)
                     .fixedSize(horizontal: false, vertical: true)
             }

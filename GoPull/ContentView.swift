@@ -279,6 +279,14 @@ struct ContentView: View {
             if model.importer.isRunning {
                 importProgress
             }
+            // A burn-in outlives the editor sheet, so it reports here too --
+            // otherwise closing that sheet leaves it running with nothing to
+            // show for it, and a part-written file that looks like a failure.
+            if model.overlayExporter.isRunning {
+                overlayExportProgress
+            } else if let exported = model.overlayExportResult {
+                overlayExportFinished(exported)
+            }
 
             HStack(alignment: .top, spacing: 14) {
                 VStack(alignment: .leading, spacing: 2) {
@@ -376,6 +384,36 @@ struct ContentView: View {
                       allowedContentTypes: [.folder]) { result in
             if case .success(let url) = result { model.destination = url }
         }
+    }
+
+    private var overlayExportProgress: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            ProgressView(value: model.overlayExporter.progress.fraction)
+            HStack {
+                Label("Burning in overlays — \(model.overlayExporter.clipName ?? "")",
+                      systemImage: "speedometer")
+                    .lineLimit(1).truncationMode(.middle)
+                Spacer()
+                Text(String(format: "%.0f fps", model.overlayExporter.progress.framesPerSecond))
+                    .monospacedDigit()
+                Button("Cancel") { model.cancelOverlayExport() }
+                    .buttonStyle(.link)
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+    }
+
+    private func overlayExportFinished(_ url: URL) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+            Text("Exported")
+            Button(url.lastPathComponent) { model.revealOverlayExport() }
+                .buttonStyle(.link).lineLimit(1).truncationMode(.middle)
+            Spacer()
+        }
+        .font(.caption)
+        .foregroundStyle(.secondary)
     }
 
     private var importProgress: some View {

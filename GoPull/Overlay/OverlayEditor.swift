@@ -36,11 +36,8 @@ final class OverlayEditorModel: ObservableObject {
     @Published var dragging: Handle?
 
     @Published var exportOptions = ExportOptions()
-    @Published private(set) var exportProgress: ExportProgress?
-    @Published private(set) var exportedTo: URL?
-    @Published var exportError: String?
-    let exporter = OverlayExporter()
-    private var exportTask: Task<Void, Never>?
+    /// Export itself lives on AppModel so it outlives this sheet.
+    let app = AppModel.shared
 
     private let url: URL
     private var raw = TelemetryTrack()
@@ -174,7 +171,7 @@ final class OverlayEditorModel: ObservableObject {
 
     // MARK: - Export
 
-    var isExporting: Bool { exportTask != nil }
+    var isExporting: Bool { app.isExportingOverlay }
 
     /// Where a burned-in copy goes.
     var exportDestination: URL {
@@ -206,49 +203,13 @@ final class OverlayEditorModel: ObservableObject {
 
     func export() {
         confirmingReplace = false
-        guard exportTask == nil, track.hasFix else { return }
-        exportError = nil
-        exportedTo = nil
-        let destination = exportDestination
-        let settings = self.settings
-        let options = exportOptions
-        let track = self.track
-        let clip = url
-
-        exportTask = Task { [weak self] in
-            guard let self else { return }
-            let ticker = Task { @MainActor [weak self] in
-                while let self, self.exporter.isRunning {
-                    self.exportProgress = self.exporter.progress
-                    try? await Task.sleep(nanoseconds: 200_000_000)
-                }
-            }
-            do {
-                try await self.exporter.export(clip: clip, to: destination, track: track,
-                                               settings: settings, options: options)
-                self.exportedTo = destination
-            } catch is CancellationError {
-                try? FileManager.default.removeItem(at: destination)
-            } catch {
-                // A cancelled export leaves a partial file, which is worse than
-                // no file: it looks like a finished export that is simply short.
-                try? FileManager.default.removeItem(at: destination)
-                self.exportError = error.localizedDescription
-            }
-            ticker.cancel()
-            self.exportProgress = nil
-            self.exportTask = nil
-        }
+        guard !app.isExportingOverlay, track.hasFix else { return }
+        app.startOverlayExport(clip: url, to: exportDestination, track: track,
+                               settings: settings, options: exportOptions)
     }
 
-    func cancelExport() {
-        exportTask?.cancel()
-    }
-
-    func revealExport() {
-        guard let exportedTo else { return }
-        NSWorkspace.shared.activateFileViewerSelecting([exportedTo])
-    }
+    func cancelExport() { app.cancelOverlayExport() }
+    func revealExport() { app.revealOverlayExport() }
 
     /// What the export will produce, so the size is known before it starts.
     var exportSummary: String {

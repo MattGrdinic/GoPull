@@ -44,6 +44,10 @@ final class AppModel: ObservableObject {
     static let shared = AppModel()
 
     let importer = Importer()
+    /// Owned here, not by the editor, so a burn-in keeps running and keeps
+    /// reporting when the editor sheet is closed. Closing that sheet used to
+    /// leave an export running with nothing anywhere saying so.
+    let overlayExporter = OverlayExporter()
     let previews = PreviewStore()
     let mountPoint = MountController.defaultMountPoint
 
@@ -53,6 +57,9 @@ final class AppModel: ObservableObject {
     private var missedPolls = 0
     private var isEjecting = false
     private var importTask: Task<Void, Never>?
+    private var overlayExportTask: Task<Void, Never>?
+    @Published private(set) var overlayExportResult: URL?
+    @Published var overlayExportError: String?
 
     var isConnected: Bool { info != nil }
 
@@ -320,6 +327,42 @@ final class AppModel: ObservableObject {
         try? FileManager.default.createDirectory(at: destination,
                                                  withIntermediateDirectories: true)
         NSWorkspace.shared.open(destination)
+    }
+
+    // MARK: - Overlay export
+
+    var isExportingOverlay: Bool { overlayExportTask != nil }
+
+    func startOverlayExport(clip: URL, to destination: URL, track: TelemetryTrack,
+                            settings: OverlaySettings, options: ExportOptions) {
+        guard overlayExportTask == nil else { return }
+        overlayExportError = nil
+        overlayExportResult = nil
+        overlayExportTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                try await self.overlayExporter.export(clip: clip, to: destination,
+                                                      track: track, settings: settings,
+                                                      options: options)
+                self.overlayExportResult = destination
+            } catch is CancellationError {
+                // Cancelling is not a failure worth an alert.
+            } catch let error as ExportError where error.isCancellation {
+            } catch {
+                self.overlayExportError = error.localizedDescription
+            }
+            self.overlayExportTask = nil
+        }
+    }
+
+    func cancelOverlayExport() {
+        overlayExporter.cancel()
+        overlayExportTask?.cancel()
+    }
+
+    func revealOverlayExport() {
+        guard let url = overlayExportResult else { return }
+        NSWorkspace.shared.activateFileViewerSelecting([url])
     }
 
     // MARK: - Importing

@@ -88,6 +88,11 @@ enum ExportError: LocalizedError {
         case .cancelled:           return "Export cancelled."
         }
     }
+
+    var isCancellation: Bool {
+        if case .cancelled = self { return true }
+        return false
+    }
 }
 
 struct ExportProgress {
@@ -101,13 +106,34 @@ final class OverlayExporter: ObservableObject {
 
     @Published private(set) var isRunning = false
     @Published private(set) var progress = ExportProgress()
+    /// What is being exported, for showing progress outside the editor.
+    @Published private(set) var clipName: String?
+
+    /// Set from `cancel()`.
+    ///
+    /// `Task.isCancelled` was being read inside the writer's callback, which
+    /// runs on a dispatch queue with no task context, so it was always false and
+    /// Cancel did nothing.
+    private let cancelled = Cancellation()
+
+    final class Cancellation: @unchecked Sendable {
+        private let lock = NSLock()
+        private var value = false
+        var isSet: Bool { lock.lock(); defer { lock.unlock() }; return value }
+        func set() { lock.lock(); value = true; lock.unlock() }
+        func reset() { lock.lock(); value = false; lock.unlock() }
+    }
+
+    func cancel() { cancelled.set() }
 
     /// Writes `clip` with overlays burned in to `destination`.
     func export(clip: URL, to destination: URL, track: TelemetryTrack,
                 settings: OverlaySettings, options: ExportOptions) async throws {
         isRunning = true
+        cancelled.reset()
+        clipName = clip.lastPathComponent
         progress = ExportProgress()
-        defer { isRunning = false }
+        defer { isRunning = false; clipName = nil }
 
         let asset = AVURLAsset(url: clip)
         guard let video = try await asset.loadTracks(withMediaType: .video).first else {
@@ -128,15 +154,16 @@ final class OverlayExporter: ObservableObject {
         // Built once for the whole export rather than per frame.
         let projection = RouteProjection(track.usable.map(\.coordinate))
 
-        // Always write somewhere new first. Replacing the original means
-        // writing beside it and swapping at the end -- a writer cannot read the
-        // file it is overwriting, and a failure part-way through would otherwise
-        // leave the source truncated with no way back.
+        // Always write somewhere hidden and move it into place at the end,
+        // whether or not the original is being replaced.
+        //
+        // An MP4's `moov` atom is written last, so a partly-written file has no
+        // index and will not open. Writing it at the destination name means an
+        // export in progress is indistinguishable from a finished export that is
+        // broken -- which is exactly how it was read.
         let replacing = destination == clip
-        let writeTo = replacing
-            ? destination.deletingLastPathComponent()
-                .appendingPathComponent(".\(destination.lastPathComponent).gopull-export")
-            : destination
+        let writeTo = destination.deletingLastPathComponent()
+            .appendingPathComponent(".\(destination.lastPathComponent).gopull-export")
         try? FileManager.default.removeItem(at: writeTo)
 
         let reader = try AVAssetReader(asset: asset)
@@ -207,7 +234,7 @@ final class OverlayExporter: ObservableObject {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             videoInput.requestMediaDataWhenReady(on: videoQueue) {
                 while videoInput.isReadyForMoreMediaData {
-                    if Task.isCancelled {
+                    if self.cancelled.isSet || Task.isCancelled {
                         reader.cancelReading(); videoInput.markAsFinished()
                         continuation.resume(throwing: ExportError.cancelled)
                         return
@@ -260,15 +287,17 @@ final class OverlayExporter: ObservableObject {
             throw ExportError.cannotWrite(writer.error?.localizedDescription ?? "unknown")
         }
 
-        if replacing {
-            // Swap atomically, so an interrupted replace cannot destroy the
-            // original: either the old file or the new one is there, never half.
-            do {
+        do {
+            if replacing || FileManager.default.fileExists(atPath: destination.path) {
+                // Atomic, so an interrupted replace cannot destroy the original:
+                // either the old file or the new one is there, never half.
                 _ = try FileManager.default.replaceItemAt(destination, withItemAt: writeTo)
-            } catch {
-                try? FileManager.default.removeItem(at: writeTo)
-                throw ExportError.cannotWrite(error.localizedDescription)
+            } else {
+                try FileManager.default.moveItem(at: writeTo, to: destination)
             }
+        } catch {
+            try? FileManager.default.removeItem(at: writeTo)
+            throw ExportError.cannotWrite(error.localizedDescription)
         }
         progress.fraction = 1
     }

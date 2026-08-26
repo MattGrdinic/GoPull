@@ -29,20 +29,7 @@ enum GaugeRenderer {
 
     /// The gauge's box for a frame of this size.
     static func frame(in size: CGSize, config: GaugeConfig) -> CGRect {
-        let short = min(size.width, size.height)
-        let side = short * config.scale
-        let inset = short * config.margin
-        let x: CGFloat = switch config.corner {
-        case .topLeft, .bottomLeft:   inset
-        case .topRight, .bottomRight: size.width - side - inset
-        }
-        // Core Graphics has y increasing upward, so "top" is the far edge.
-        let y: CGFloat = switch config.corner {
-        case .bottomLeft, .bottomRight: inset
-        case .topLeft, .topRight:       size.height - side - inset
-        }
-        let height = config.kind == .bar ? side * 0.34 : side
-        return CGRect(x: x, y: y, width: side, height: height)
+        config.placement.rect(in: size, heightRatio: config.kind == .bar ? 0.34 : 1)
     }
 
     static func draw(_ reading: GaugeReading, in context: CGContext,

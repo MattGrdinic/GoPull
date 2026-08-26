@@ -37,24 +37,34 @@ struct GaugeTests {
 
     private let frame = CGSize(width: 1920, height: 1080)
 
-    @Test func theGaugeSitsInTheChosenCorner() {
+    @Test func theGaugeSitsWhereItIsPlaced() {
         var config = GaugeConfig()
-        config.corner = .bottomLeft
+        config.placement = .corner(.bottomLeft, aspect: 1920.0 / 1080.0)
         let bottomLeft = GaugeRenderer.frame(in: frame, config: config)
-        config.corner = .topRight
+        config.placement = .corner(.topRight, aspect: 1920.0 / 1080.0)
         let topRight = GaugeRenderer.frame(in: frame, config: config)
 
         #expect(bottomLeft.minX < frame.width / 2)
-        #expect(bottomLeft.minY < frame.height / 2)
+        #expect(bottomLeft.midY < frame.height / 2)   // CG: bottom is low y
         #expect(topRight.maxX > frame.width / 2)
-        #expect(topRight.maxY > frame.height / 2)
+        #expect(topRight.midY > frame.height / 2)
+    }
+
+    /// The gauge is free-placed, not snapped to a corner.
+    @Test func theGaugeCanGoAnywhere() {
+        var config = GaugeConfig()
+        config.placement = OverlayPlacement(x: 0.33, y: 0.66, scale: 0.2)
+        let rect = GaugeRenderer.frame(in: frame, config: config)
+        #expect(abs(rect.midX - frame.width * 0.33) < 0.5)
+        #expect(abs(rect.midY - frame.height * (1 - 0.66)) < 0.5)
     }
 
     @Test func theGaugeStaysInsideTheFrame() {
         for corner in OverlayCorner.allCases {
             for kind in GaugeKind.allCases {
                 var config = GaugeConfig()
-                config.corner = corner; config.kind = kind
+                config.placement = .corner(corner, aspect: 1920.0 / 1080.0)
+                config.kind = kind
                 let rect = GaugeRenderer.frame(in: frame, config: config)
                 #expect(rect.minX >= 0 && rect.minY >= 0)
                 #expect(rect.maxX <= frame.width && rect.maxY <= frame.height)
@@ -77,14 +87,14 @@ struct GaugeTests {
     @Test func applyingAPresetKeepsPlacementAndUnits() {
         var config = GaugeConfig()
         config.unit = .kph
-        config.corner = .topRight
+        config.placement = OverlayPlacement(x: 0.8, y: 0.2, scale: 0.3)
         config.smoothingSeconds = 1.5
         config.apply(.classic)
 
         #expect(config.preset == .classic)
         #expect(config.style == .preset(.classic))
         #expect(config.unit == .kph)
-        #expect(config.corner == .topRight)
+        #expect(config.placement == OverlayPlacement(x: 0.8, y: 0.2, scale: 0.3))
         #expect(config.smoothingSeconds == 1.5)
     }
 

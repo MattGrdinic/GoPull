@@ -158,7 +158,7 @@ struct GaugeStyle: Equatable, Codable {
     }
 }
 
-/// Where the gauge sits on the frame.
+/// The four corners, as a shortcut for the common placements.
 enum OverlayCorner: String, CaseIterable, Identifiable, Codable {
     case topLeft, topRight, bottomLeft, bottomRight
 
@@ -173,6 +173,70 @@ enum OverlayCorner: String, CaseIterable, Identifiable, Codable {
     }
 }
 
+/// Where an overlay sits, and how big it is.
+///
+/// The centre is stored as a fraction of the frame with **y measured from the
+/// top**, which is what a drag in the UI reports. Core Graphics counts y from
+/// the bottom, so the renderer flips it once, in `rect(in:)`, rather than every
+/// caller having to remember.
+///
+/// Storing a free position rather than a corner means the gauge and the map can
+/// be put anywhere -- over a tank, off to one side, wherever the footage leaves
+/// room -- and corners are just presets.
+struct OverlayPlacement: Equatable, Codable {
+    /// 0 is the left edge, 1 the right.
+    var x: Double
+    /// 0 is the top edge, 1 the bottom.
+    var y: Double
+    /// Width as a fraction of the frame's shorter side.
+    var scale: Double
+
+    init(x: Double, y: Double, scale: Double = 0.28) {
+        self.x = x; self.y = y; self.scale = scale
+    }
+
+    /// Inset from the edge, also as a fraction of the shorter side.
+    static let cornerMargin = 0.035
+
+    static func corner(_ corner: OverlayCorner, scale: Double = 0.28,
+                       aspect: Double = 16.0 / 9.0) -> OverlayPlacement {
+        // The margin is in units of the shorter side, so converting it to a
+        // fraction of the width means dividing by the aspect ratio.
+        let halfW = (scale / 2 + cornerMargin) / aspect
+        let halfH = scale / 2 + cornerMargin
+        switch corner {
+        case .topLeft:     return OverlayPlacement(x: halfW, y: halfH, scale: scale)
+        case .topRight:    return OverlayPlacement(x: 1 - halfW, y: halfH, scale: scale)
+        case .bottomLeft:  return OverlayPlacement(x: halfW, y: 1 - halfH, scale: scale)
+        case .bottomRight: return OverlayPlacement(x: 1 - halfW, y: 1 - halfH, scale: scale)
+        }
+    }
+
+    /// The box to draw in, in Core Graphics coordinates.
+    ///
+    /// `heightRatio` lets a wide overlay (the bar) keep its shape.
+    func rect(in size: CGSize, heightRatio: Double = 1) -> CGRect {
+        let short = min(size.width, size.height)
+        let width = short * scale
+        let height = width * heightRatio
+        let centreX = size.width * x
+        let centreY = size.height * (1 - y)      // flip: stored from the top
+        return CGRect(x: centreX - width / 2, y: centreY - height / 2,
+                      width: width, height: height)
+    }
+
+    /// Keeps the overlay fully on screen, for dragging.
+    func clamped(in size: CGSize, heightRatio: Double = 1) -> OverlayPlacement {
+        let short = min(size.width, size.height)
+        let halfW = (short * scale / 2) / size.width
+        let halfH = (short * scale * heightRatio / 2) / size.height
+        var copy = self
+        copy.x = min(max(x, halfW), 1 - halfW)
+        copy.y = min(max(y, halfH), 1 - halfH)
+        return copy
+    }
+}
+
 /// Everything needed to draw one gauge.
 struct GaugeConfig: Equatable, Codable {
     var kind: GaugeKind = .dial
@@ -182,11 +246,8 @@ struct GaugeConfig: Equatable, Codable {
     /// Top of the dial's scale. Nil means "fit the clip", worked out from the
     /// fastest reading it contains.
     var maxSpeed: Double?
-    var corner: OverlayCorner = .bottomLeft
-    /// Gauge width as a fraction of the frame's shorter side.
-    var scale: Double = 0.28
-    /// Inset from the frame edge, also as a fraction of the shorter side.
-    var margin: Double = 0.035
+    /// Free placement, so the gauge can go anywhere the footage leaves room.
+    var placement: OverlayPlacement = .corner(.bottomLeft)
     var smoothingSeconds: Double = Smoothing.default.seconds
     /// Show the reading when the camera has no fix, rather than hiding.
     var showsWhenNoFix: Bool = true

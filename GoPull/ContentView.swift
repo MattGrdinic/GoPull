@@ -9,6 +9,7 @@ import UniformTypeIdentifiers
 struct ContentView: View {
     @EnvironmentObject private var model: AppModel
     @State private var choosingDestination = false
+    @State private var previewing: MediaFile?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -145,6 +146,8 @@ struct ContentView: View {
                     .foregroundStyle(model.alreadyImported(file) ? .green : .secondary)
                     .help(model.alreadyImported(file) ? "Already imported" : "Not imported yet")
 
+                ClipThumbnail(file: file)
+
                 VStack(alignment: .leading, spacing: 1) {
                     HStack(spacing: 5) {
                         Text(file.name)
@@ -155,9 +158,7 @@ struct ContentView: View {
                                 .background(.quaternary, in: Capsule())
                         }
                     }
-                    Text(model.devicesOnCard.count > 1
-                         ? "\(file.device.label) · \(file.folder)"
-                         : file.folder)
+                    Text(rowSubtitle(for: file))
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
                 }
@@ -176,9 +177,48 @@ struct ContentView: View {
                     .frame(width: 72, alignment: .trailing)
             }
             .padding(.vertical, 2)
+            .contentShape(Rectangle())
+            .onTapGesture(count: 2) { preview(file) }
+            .contextMenu {
+                Button("Preview") { preview(file) }
+                    .disabled(model.importer.isRunning || model.previewSource(for: file) == nil)
+            }
             .tag(file.id)
         }
         .listStyle(.inset)
+        .sheet(item: $previewing) { file in
+            if let source = model.previewSource(for: file) {
+                ClipPreviewSheet(file: file, source: source,
+                                 details: model.previews.details[file.id])
+            }
+        }
+    }
+
+    /// Duration and resolution once the camera has told us, folder until then.
+    private func rowSubtitle(for file: MediaFile) -> String {
+        var parts: [String] = []
+        if model.devicesOnCard.count > 1 { parts.append(file.device.label) }
+        parts.append(file.folder)
+        if let summary = model.previews.details[file.id]?.summary, !summary.isEmpty {
+            parts.append(summary)
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    /// Previewing opens a fifth stream against a camera that is already
+    /// serving four, and an import is the operation worth protecting. Playback
+    /// waits until it finishes.
+    private func preview(_ file: MediaFile) {
+        guard !model.importer.isRunning, model.previewSource(for: file) != nil else { return }
+        previewing = file
+    }
+
+    /// The clip a Preview button would act on: the selection when it is a
+    /// single clip, so the button matches what the list is showing as chosen.
+    private var previewTarget: MediaFile? {
+        guard !model.importer.isRunning else { return nil }
+        guard model.selection.count == 1, let id = model.selection.first else { return nil }
+        return model.visibleFiles.first { $0.id == id && model.previewSource(for: $0) != nil }
     }
 
     // MARK: - Footer
@@ -246,6 +286,15 @@ struct ContentView: View {
                 if model.importer.isRunning {
                     Button("Cancel") { model.cancelImport() }
                 } else {
+                    Button {
+                        if let target = previewTarget { preview(target) }
+                    } label: {
+                        Label("Preview", systemImage: "play.rectangle")
+                    }
+                    .disabled(previewTarget == nil)
+                    .help("Play the camera's low-resolution proxy without copying anything. "
+                          + "Double-clicking a clip does the same.")
+
                     Button("Import Selected") { model.importSelected() }
                     .disabled(model.selection.isEmpty)
 

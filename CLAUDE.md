@@ -139,6 +139,15 @@ cancelled the import and reported it as an unplugged camera — so every clip lo
 transfer failed while short ones worked. `refresh()` now returns early on `importer.isRunning`;
 the import is its own liveness check. A cheap `keepAlive()` ping is *not* a safe substitute.
 
+**`import AVKit` does not link `AVKit.framework`.** It autolinks the `_AVKit_SwiftUI` shim only,
+so SwiftUI's `VideoPlayer` crashes on first render with `SIGABRT` in `getSuperclassMetadata`.
+`PreviewWindow.swift` wraps `AVPlayerView` directly, which is a hard symbol reference and pulls
+AVKit in. Check `otool -L` before suspecting SwiftUI.
+
+**Preview traffic is import traffic.** Thumbnails and `/gopro/media/info` use the same control
+API that must stay untouched during an import, and playback would be a fifth stream. `PreviewStore`
+suspends and `ContentView` disables preview while `importer.isRunning`.
+
 **Camera present with no card looks like no camera.** `/gopro/media/list` fails either way.
 `refresh()` disambiguates with `keepAlive()`; don't collapse those branches.
 

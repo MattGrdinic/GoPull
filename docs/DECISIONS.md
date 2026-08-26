@@ -371,3 +371,64 @@ file's length against `file.size`, but `ftruncate` had already set that length, 
 matter how many bytes actually landed. A destination that filled up mid-import produced a
 full-length, correctly-named, quietly corrupt clip. The check now counts the bytes the chunks
 delivered instead.
+
+---
+
+## 23. Preview plays the camera's proxy, and copies nothing
+
+**Decision.** Double-clicking a clip streams it straight off the camera, playing the `.LRV`
+proxy that sits beside it on the card rather than the original. Rows also carry a thumbnail and
+the camera's own duration, resolution and frame rate.
+
+**Why this is nearly free.** The camera already has everything needed, and none of it is the
+clip:
+
+| endpoint | cost, measured |
+|---|---|
+| `/gopro/media/thumbnail?path=…` | 60 KB JPEG in ~30ms |
+| `/gopro/media/info?path=…` | duration, `w`/`h`, `fps`, and `ls` — the proxy's length |
+| whole card, 12 clips | 0.6 MB and 1.04s, thumbnails and details together |
+
+And the file server sends `Content-Type: video/mp4` with `Accept-Ranges: bytes`, so AVPlayer
+seeks against a file on the card without downloading it. Loading `GL010005.LRV` and decoding a
+frame from its midpoint takes 0.03s and 0.01s. The proxy is 364 MB and 960x540 against a 10.7 GB
+8K original — playable over USB, where the original would not be.
+
+**Proxies are matched, not constructed.** GoPro names a clip `GX010005.MP4` and its proxy
+`GL010005.LRV`. Rather than rebuild that name and hope, `MediaPreview.proxy(for:among:)` matches
+the digits against the files actually on the card, which also covers the `GH`/`GS` prefixes older
+bodies use and simply finds nothing for a clip written by another device — which then previews at
+full resolution instead.
+
+**Preview stands down during an import**, both halves of it: thumbnail requests go to the same
+control API that [#21](#21-polling-stands-down-completely-while-an-import-runs) is about, and
+playback would open a fifth stream against a camera already serving four. The import wins.
+
+---
+
+## 24. `import AVKit` does not link AVKit
+
+**Decision.** The player is `AVPlayerView` wrapped in an `NSViewRepresentable`, not SwiftUI's
+`VideoPlayer`.
+
+**Why, and it is not a preference.** `VideoPlayer` crashed the app with `SIGABRT` the instant the
+sheet opened:
+
+```
+swift::fatalError
+getSuperclassMetadata
+_swift_initClassMetadataImpl
+_AVKit_SwiftUI  0x1974
+```
+
+`import AVKit` autolinks the `_AVKit_SwiftUI` shim but **not `AVKit.framework` itself** —
+confirmed with `otool -L`, and confirmed again in the crash report, where `_AVKit_SwiftUI` is
+among the loaded images and `AVKit` is not. So `VideoPlayer` resolved its own shim and then died
+looking for `AVPlayerView`'s metadata.
+
+Naming `AVPlayerView` in our own code is a hard symbol reference, so the linker brings AVKit
+along — `otool -L` now lists it. That also gets the real transport bar (scrubbing, volume,
+full-screen) instead of rebuilding one.
+
+**If you ever see `getSuperclassMetadata` in a crash**, check `otool -L` before anything else.
+The symptom looks like a SwiftUI bug and is a missing link.

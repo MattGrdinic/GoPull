@@ -77,4 +77,83 @@ struct GoPullTests {
                                           organiseByDate: true, cameraFolder: nil)
         #expect(url.path == "/tmp/dest/undated/GX010005.MP4")
     }
+
+    // MARK: - Preview details
+
+    /// The camera sends every value as a string, and frame rate as a rational.
+    @Test func detailsParseTheCamerasStringsAndRational() throws {
+        let details = try #require(MediaDetails(json: [
+            "w": "7680", "h": "4320", "dur": "384",
+            "fps": "30000", "fps_denom": "1001", "ls": "381862591",
+        ]))
+        #expect(details.width == 7680)
+        #expect(details.height == 4320)
+        #expect(details.duration == 384)
+        #expect(details.summary == "6:24 · 7680×4320 · 29.97 fps")
+        #expect(details.proxyBytes == 381_862_591)
+    }
+
+    @Test func stillsHaveNoDurationOrFrameRate() throws {
+        let details = try #require(MediaDetails(json: ["w": "4096", "h": "3072"]))
+        #expect(details.duration == nil)
+        #expect(details.summary == "4096×3072")
+    }
+
+    @Test func longClipsGetAnHoursComponent() throws {
+        let details = try #require(MediaDetails(json: ["w": "1920", "h": "1080", "dur": "3725"]))
+        #expect(details.durationLabel == "1:02:05")
+    }
+
+    @Test func aPayloadWithNothingUsefulIsRejected() {
+        #expect(MediaDetails(json: ["gumi": "abc"]) == nil)
+    }
+
+    // MARK: - Proxy matching
+
+    private var card: [MediaFile] {
+        ["GX010005.MP4", "GL010005.LRV", "GX020005.MP4", "GL020005.LRV",
+         "GP010007.JPG", "GX010005.MP4"].enumerated().map { _, name in
+            MediaFile(folder: "100GOPRO", name: name, size: 1, modified: nil)
+        }
+    }
+
+    @Test func proxyMatchesTheRecordingNotTheLetter() {
+        let clip = MediaFile(folder: "100GOPRO", name: "GX010005.MP4", size: 1, modified: nil)
+        #expect(MediaPreview.proxy(for: clip, among: card)?.name == "GL010005.LRV")
+    }
+
+    /// The chapter number is part of the stem, so chapter 2 must not pick up
+    /// chapter 1's proxy.
+    @Test func proxyDoesNotCrossChapters() {
+        let clip = MediaFile(folder: "100GOPRO", name: "GX020005.MP4", size: 1, modified: nil)
+        #expect(MediaPreview.proxy(for: clip, among: card)?.name == "GL020005.LRV")
+    }
+
+    @Test func proxyIsScopedToItsFolder() {
+        let clip = MediaFile(folder: "101GOPRO", name: "GX010005.MP4", size: 1, modified: nil)
+        #expect(MediaPreview.proxy(for: clip, among: card) == nil)
+    }
+
+    @Test func stillsAndProxiesHaveNoProxyOfTheirOwn() {
+        let photo = MediaFile(folder: "100GOPRO", name: "GP010007.JPG", size: 1, modified: nil)
+        let proxy = MediaFile(folder: "100GOPRO", name: "GL010005.LRV", size: 1, modified: nil)
+        #expect(MediaPreview.proxy(for: photo, among: card) == nil)
+        #expect(MediaPreview.proxy(for: proxy, among: card) == nil)
+    }
+
+    /// A clip from another device may not follow GoPro's naming at all.
+    @Test func aClipWithNoProxyFallsBackToItself() {
+        let clip = MediaFile(folder: "100GOPRO", name: "DJI_0001.MP4", size: 1, modified: nil)
+        let source = MediaPreview.source(for: clip, among: card, cameraIP: "172.24.113.51")
+        guard case .video(let url, let isProxy)? = source else {
+            Issue.record("expected a video source"); return
+        }
+        #expect(!isProxy)
+        #expect(url.absoluteString.hasSuffix("/videos/DCIM/100GOPRO/DJI_0001.MP4"))
+    }
+
+    @Test func withoutACameraThereIsNothingToPlay() {
+        let clip = MediaFile(folder: "100GOPRO", name: "GX010005.MP4", size: 1, modified: nil)
+        #expect(MediaPreview.source(for: clip, among: card, cameraIP: "") == nil)
+    }
 }

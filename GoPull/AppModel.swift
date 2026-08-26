@@ -44,6 +44,7 @@ final class AppModel: ObservableObject {
     static let shared = AppModel()
 
     let importer = Importer()
+    let previews = PreviewStore()
     let mountPoint = MountController.defaultMountPoint
 
     private let server = WebDAVServer()
@@ -194,6 +195,7 @@ final class AppModel: ObservableObject {
             cameraIP = camera.ip
             files = tree.keys.sorted().flatMap { tree[$0] ?? [] }
             freeBytes = free
+            previews.update(cameraIP: camera.ip)
             selection = selection.filter { id in files.contains { $0.id == id } }
 
             server.update(CardSnapshot(cameraIP: camera.ip,
@@ -328,6 +330,12 @@ final class AppModel: ObservableObject {
                                 cameraFolder: deviceFolder(for: file))
     }
 
+    /// What a preview would show for this clip: the low-resolution proxy when
+    /// the card has one, otherwise the clip itself.
+    func previewSource(for file: MediaFile) -> PreviewSource? {
+        MediaPreview.source(for: file, among: files, cameraIP: cameraIP)
+    }
+
     /// True when this clip is already sitting in the destination at full size.
     func alreadyImported(_ file: MediaFile) -> Bool {
         guard let size = try? FileManager.default
@@ -367,8 +375,12 @@ final class AppModel: ObservableObject {
         // state a leftover .part leaves behind, so it must still be cleaned.
         removeOrphanedParts()
         guard !chosen.isEmpty else { return }
+        // Thumbnail requests go to the same control API that stops answering
+        // under an import's range streams, so they stand down too.
+        previews.suspend()
         importTask = Task { [weak self] in
             await self?.importFiles(chosen)
+            self?.previews.resume()
             self?.importTask = nil
         }
     }

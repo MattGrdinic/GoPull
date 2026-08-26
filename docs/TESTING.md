@@ -124,3 +124,7 @@ MISSION 1 PRO, firmware `H26.01.02.02.00`, over USB to an Apple Silicon Mac.
 | Spot-checks at 1/3/4/6/9 GiB offsets | byte-identical to the camera |
 | 1.16 GB clip after a cancel | MD5 identical to the camera |
 | Control API during an import | `media/list`, `DCIM/` and `keep_alive` all hit the 15s timeout |
+| Thumbnails + details, whole card | 12 clips in 1.04s, 0.6 MB total |
+| `AVURLAsset` against a `.LRV` on the camera | duration in 0.03s, midpoint frame in 0.01s |
+| Preview of an 11.54 GB 8K clip | plays its 364 MB proxy, nothing copied |
+| `VideoPlayer` from AVKit | crashes on open — see DECISIONS #24 |

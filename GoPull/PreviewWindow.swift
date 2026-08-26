@@ -178,6 +178,13 @@ struct ClipThumbnail: View {
                     .resizable()
                     .scaledToFill()
                     .clipShape(RoundedRectangle(cornerRadius: 3))
+                // Says "this plays" without needing to be discovered.
+                if MediaPreview.isVideo(file), !file.isSidecar {
+                    Image(systemName: "play.circle.fill")
+                        .font(.system(size: 17))
+                        .foregroundStyle(.white.opacity(0.9), .black.opacity(0.35))
+                        .shadow(radius: 1)
+                }
             } else {
                 Image(systemName: file.isSidecar ? "square.stack.3d.down.right"
                                                  : (MediaPreview.isStill(file) ? "photo" : "film"))

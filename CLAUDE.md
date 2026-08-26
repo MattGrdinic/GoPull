@@ -144,6 +144,14 @@ so SwiftUI's `VideoPlayer` crashes on first render with `SIGABRT` in `getSupercl
 `PreviewWindow.swift` wraps `AVPlayerView` directly, which is a hard symbol reference and pulls
 AVKit in. Check `otool -L` before suspecting SwiftUI.
 
+**Nothing that takes a click may sit on a `List` row.** Selecting clips to import and
+double-clicking one to preview compete for the same click. `.onTapGesture(count: 2)` on a row
+stops selection working entirely — its gesture outranks the one `List(selection:)` uses — and so
+does `.contentShape(Rectangle())`, which takes the click by reshaping the row's hit area.
+`.simultaneousGesture` alone is safe but only fires over the row's real content. Put anything
+clickable in an actual `Button` (as the thumbnail is) and selection is left alone. Verify against
+the running app: this breaks silently, with no warning and no crash.
+
 **Preview traffic is import traffic.** Thumbnails and `/gopro/media/info` use the same control
 API that must stay untouched during an import, and playback would be a fifth stream. `PreviewStore`
 suspends and `ContentView` disables preview while `importer.isRunning`.

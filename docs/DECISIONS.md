@@ -432,3 +432,28 @@ full-screen) instead of rebuilding one.
 
 **If you ever see `getSuperclassMetadata` in a crash**, check `otool -L` before anything else.
 The symptom looks like a SwiftUI bug and is a missing link.
+
+---
+
+## 25. The preview affordance is a Button, not a gesture on the row
+
+**Decision.** The thumbnail is a real `Button`. Double-click via `simultaneousGesture` is kept as
+a convenience, but it is not what the feature rests on.
+
+**Why, and this shipped broken once.** Adding preview cost the ability to select clips to import,
+which is the app's main job. Three spellings, all tried against the running app:
+
+| on the row | selection | double-click |
+|---|---|---|
+| `.onTapGesture(count: 2)` | **broken** | works |
+| `.contentShape` + `.simultaneousGesture` | **broken** | works |
+| `.simultaneousGesture` alone | works | only over real content |
+| a `Button` around the thumbnail | works | n/a — it is a click |
+
+A tap gesture on a row outranks the gesture `List(selection:)` relies on, and `contentShape`
+loses the click the same way by reshaping the row's hit area. A `Button` handles its own click
+and leaves selection alone, which is why the reliable path is a button rather than a cleverer
+gesture.
+
+**It fails silently.** No warning, no crash, no visual difference — rows simply stop highlighting.
+Anything added to a row has to be checked by clicking one.

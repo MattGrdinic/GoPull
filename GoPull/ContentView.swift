@@ -146,7 +146,11 @@ struct ContentView: View {
                     .foregroundStyle(model.alreadyImported(file) ? .green : .secondary)
                     .help(model.alreadyImported(file) ? "Already imported" : "Not imported yet")
 
-                ClipThumbnail(file: file)
+                Button { preview(file) } label: { ClipThumbnail(file: file) }
+                    .buttonStyle(.plain)
+                    .disabled(model.importer.isRunning
+                              || model.previewSource(for: file) == nil)
+                    .help("Play a preview straight from the camera, without copying it")
 
                 VStack(alignment: .leading, spacing: 1) {
                     HStack(spacing: 5) {
@@ -177,8 +181,23 @@ struct ContentView: View {
                     .frame(width: 72, alignment: .trailing)
             }
             .padding(.vertical, 2)
-            .contentShape(Rectangle())
-            .onTapGesture(count: 2) { preview(file) }
+            // Selecting clips to import and double-clicking one to preview it
+            // compete for the same click, and two obvious spellings each break
+            // selection outright -- verified against the running app:
+            //
+            //   .onTapGesture(count: 2)          rows stop selecting entirely;
+            //                                    its gesture outranks the one
+            //                                    `List(selection:)` uses.
+            //   .contentShape + simultaneous     also stops rows selecting,
+            //                                    because reshaping the row's
+            //                                    hit area takes the click too.
+            //
+            // `simultaneousGesture` alone leaves selection intact, at the cost
+            // of only being live over the row's actual content -- double-click
+            // works on the name, not on the empty space beside it. The reliable
+            // affordance is the thumbnail above, which is a real Button and so
+            // handles its own click without touching selection at all.
+            .simultaneousGesture(TapGesture(count: 2).onEnded { preview(file) })
             .contextMenu {
                 Button("Preview") { preview(file) }
                     .disabled(model.importer.isRunning || model.previewSource(for: file) == nil)

@@ -128,3 +128,6 @@ MISSION 1 PRO, firmware `H26.01.02.02.00`, over USB to an Apple Silicon Mac.
 | `AVURLAsset` against a `.LRV` on the camera | duration in 0.03s, midpoint frame in 0.01s |
 | Preview of an 11.54 GB 8K clip | plays its 364 MB proxy, nothing copied |
 | `VideoPlayer` from AVKit | crashes on open — see DECISIONS #24 |
+| Row selection with a double-click gesture | broken by `onTapGesture`, and by `contentShape` + `simultaneousGesture` |
+| Click row, cmd-click a second | both select; Import Selected enabled, Preview disabled |
+| Click a thumbnail | preview opens, selection untouched |

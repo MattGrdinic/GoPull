@@ -97,7 +97,9 @@ tools/version set 1.4.2    # exact   tools/version tag      # print the tag comm
 **Work happens on a release branch, in pieces.** `main` is always releasable.
 
 * `feature/X.Y.Z` — one release's worth of work, branched off `main`.
-* `feature/X.Y.Z/<thing>` — one feature or fix, branched off *that*, merged back with `--no-ff`.
+* `feature/X.Y.Z-<thing>` — one feature or fix, branched off *that*, merged back with `--no-ff`.
+  A **hyphen**, never a slash: git cannot hold both `feature/1.2.0` and `feature/1.2.0/thing`,
+  because the first is a ref file and the second needs it to be a directory.
 * Bump the version on the release branch as its own commit when the work is done.
 * PR the release branch into `main`; its description is the release notes.
 * After merge, tag `main` with `vX.Y.Z` and cut the GitHub release.

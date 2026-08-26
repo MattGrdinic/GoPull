@@ -83,6 +83,33 @@ a corrupt clip in place.
 
 `Peer` is `fileprivate`-coupled to `WebDAVServer`, so it has to stay in the same file.
 
+## Versioning and branching
+
+**Semver, and `MARKETING_VERSION` is the only copy of it.** `tools/version` is the only thing that
+writes it — never hand-edit the version in the pbxproj, and never add a second copy anywhere.
+`AppVersion` reads it back from the bundle, so the app, the bundle and the tag stay in step.
+
+```bash
+tools/version              # show    tools/version minor    # bump
+tools/version set 1.4.2    # exact   tools/version tag      # print the tag command
+```
+
+**Work happens on a release branch, in pieces.** `main` is always releasable.
+
+* `feature/X.Y.Z` — one release's worth of work, branched off `main`.
+* `feature/X.Y.Z-<thing>` — one feature or fix, branched off *that*, merged back with `--no-ff`.
+  A **hyphen**, never a slash: git cannot hold both `feature/1.2.0` and `feature/1.2.0/thing`,
+  because the first is a ref file and the second needs it to be a directory.
+* Bump the version on the release branch as its own commit when the work is done.
+* PR the release branch into `main`; its description is the release notes.
+* After merge, tag `main` with `vX.Y.Z` and cut the GitHub release.
+
+Pick the bump by what changed: **minor** for a new capability, **patch** for fixes, **major** for
+something that breaks existing use. Full detail in [docs/RELEASING.md](docs/RELEASING.md).
+
+**Tagging and releasing are the user's to run**, not something to do unprompted — pushing a tag is
+outward-facing. Prepare the version bump and the PR description; let them press the button.
+
 ## Project-specific gotchas
 
 **App Sandbox must stay off.** A sandboxed child process cannot mount a filesystem, so

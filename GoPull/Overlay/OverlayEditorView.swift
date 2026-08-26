@@ -29,6 +29,15 @@ struct OverlayEditorView: View {
         }
         .frame(width: 1080, height: 700)
         .task { await model.start() }
+        .alert("Replace \(file.name)?", isPresented: $model.confirmingReplace) {
+            Button("Replace", role: .destructive) { model.export() }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("The overlays will be burned into the clip itself, and its GPS "
+                 + "track will not survive — the overlays could not be moved, "
+                 + "restyled or removed afterwards. Re-importing from the camera "
+                 + "would be the only way back.")
+        }
     }
 
     private var header: some View {
@@ -184,6 +193,22 @@ struct OverlayEditorView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Export").font(.caption).foregroundStyle(.secondary)
 
+            Picker("Write to", selection: $model.exportOptions.destination) {
+                ForEach(ExportOptions.Destination.allCases) { Text($0.label).tag($0) }
+            }
+            Text(model.exportDestination.lastPathComponent)
+                .font(.caption2).foregroundStyle(.tertiary)
+                .lineLimit(1).truncationMode(.middle)
+
+            if model.replaceWouldLoseTelemetry {
+                Label("Replacing discards this clip's GPS track — the overlays "
+                      + "could not be changed afterwards.",
+                      systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption2)
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             Picker("Size", selection: $model.exportOptions.size) {
                 ForEach(ExportOptions.Size.allCases) { Text($0.label).tag($0) }
             }
@@ -202,9 +227,11 @@ struct OverlayEditorView: View {
                 Button("Cancel Export") { model.cancelExport() }
             } else {
                 Button {
-                    model.export()
+                    model.exportRequested()
                 } label: {
-                    Label("Burn In and Export", systemImage: "square.and.arrow.down.on.square")
+                    Label(model.exportOptions.destination == .replaceOriginal
+                          ? "Burn In and Replace" : "Burn In and Export",
+                          systemImage: "square.and.arrow.down.on.square")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)

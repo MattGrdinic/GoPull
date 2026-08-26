@@ -176,15 +176,36 @@ final class OverlayEditorModel: ObservableObject {
 
     var isExporting: Bool { exportTask != nil }
 
-    /// Where a burned-in copy goes: beside the original, so it is obvious which
-    /// clip it came from and the original is never touched.
+    /// Where a burned-in copy goes.
     var exportDestination: URL {
-        let base = url.deletingPathExtension().lastPathComponent
-        return url.deletingLastPathComponent()
-            .appendingPathComponent("\(base) — overlay.mp4")
+        switch exportOptions.destination {
+        case .replaceOriginal:
+            return url
+        case .newFile:
+            let base = url.deletingPathExtension().lastPathComponent
+            return url.deletingLastPathComponent()
+                .appendingPathComponent("\(base) — overlay.mp4")
+        }
+    }
+
+    /// True when the chosen destination would throw away the clip's telemetry.
+    var replaceWouldLoseTelemetry: Bool {
+        exportOptions.destination == .replaceOriginal && track.hasFix
+    }
+
+    /// Set when Replace is chosen, so the sheet can insist before overwriting.
+    @Published var confirmingReplace = false
+
+    func exportRequested() {
+        if replaceWouldLoseTelemetry {
+            confirmingReplace = true
+        } else {
+            export()
+        }
     }
 
     func export() {
+        confirmingReplace = false
         guard exportTask == nil, track.hasFix else { return }
         exportError = nil
         exportedTo = nil

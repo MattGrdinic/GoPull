@@ -54,9 +54,24 @@ struct ExportOptions: Equatable {
         }
     }
 
+    /// Where the burned-in copy goes.
+    enum Destination: String, CaseIterable, Identifiable, Codable {
+        /// Beside the original, as "<name> — overlay.mp4". The default, and the
+        /// only one that keeps the source intact.
+        case newFile
+        /// In place of the original.
+        case replaceOriginal
+
+        var id: String { rawValue }
+        var label: String {
+            self == .newFile ? "New file" : "Replace original"
+        }
+    }
+
     var size: Size = .source
     var codec: AVVideoCodecType = .hevc
     var includesAudio = true
+    var destination: Destination = .newFile
 }
 
 enum ExportError: LocalizedError {
@@ -113,10 +128,19 @@ final class OverlayExporter: ObservableObject {
         // Built once for the whole export rather than per frame.
         let projection = RouteProjection(track.usable.map(\.coordinate))
 
-        try? FileManager.default.removeItem(at: destination)
+        // Always write somewhere new first. Replacing the original means
+        // writing beside it and swapping at the end -- a writer cannot read the
+        // file it is overwriting, and a failure part-way through would otherwise
+        // leave the source truncated with no way back.
+        let replacing = destination == clip
+        let writeTo = replacing
+            ? destination.deletingLastPathComponent()
+                .appendingPathComponent(".\(destination.lastPathComponent).gopull-export")
+            : destination
+        try? FileManager.default.removeItem(at: writeTo)
 
         let reader = try AVAssetReader(asset: asset)
-        let writer = try AVAssetWriter(outputURL: destination, fileType: .mp4)
+        let writer = try AVAssetWriter(outputURL: writeTo, fileType: .mp4)
 
         // BGRA out of the decoder so a CGContext can be wrapped straight around
         // each frame. It costs a colour conversion, and it is the only format
@@ -232,9 +256,32 @@ final class OverlayExporter: ObservableObject {
         await writer.finishWriting()
 
         if writer.status == .failed {
+            try? FileManager.default.removeItem(at: writeTo)
             throw ExportError.cannotWrite(writer.error?.localizedDescription ?? "unknown")
         }
+
+        if replacing {
+            // Swap atomically, so an interrupted replace cannot destroy the
+            // original: either the old file or the new one is there, never half.
+            do {
+                _ = try FileManager.default.replaceItemAt(destination, withItemAt: writeTo)
+            } catch {
+                try? FileManager.default.removeItem(at: writeTo)
+                throw ExportError.cannotWrite(error.localizedDescription)
+            }
+        }
         progress.fraction = 1
+    }
+
+    /// Whether replacing this clip would throw away telemetry that is not
+    /// anywhere else.
+    ///
+    /// The writer produces video and audio only; a GoPro's `gpmd` track is not
+    /// something AVFoundation can even see, let alone pass through. Overwriting
+    /// therefore destroys the GPS data, and with it any chance of adjusting the
+    /// overlays later.
+    nonisolated static func replacingLosesTelemetry(_ clip: URL) -> Bool {
+        (try? GPMFTrack.payloads(of: clip).isEmpty == false) ?? false
     }
 
     /// Copies a track through untouched.

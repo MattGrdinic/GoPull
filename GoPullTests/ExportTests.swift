@@ -67,3 +67,47 @@ struct ExportTests {
         #expect(options.size == .source)
     }
 }
+
+struct ExportDestinationTests {
+
+    /// New file is the default, because replacing is the one that cannot be
+    /// undone.
+    @Test func newFileIsTheDefault() {
+        #expect(ExportOptions().destination == .newFile)
+    }
+
+    @Test func bothDestinationsAreOffered() {
+        #expect(ExportOptions.Destination.allCases.count == 2)
+        #expect(ExportOptions.Destination.allCases.contains(.replaceOriginal))
+    }
+
+    @Test func destinationSurvivesEncoding() throws {
+        var settings = OverlaySettings.defaults
+        settings.gauge.kind = .digital
+        let data = try JSONEncoder().encode(settings)
+        #expect(try JSONDecoder().decode(OverlaySettings.self, from: data) == settings)
+
+        // The destination is a choice per export, not part of the saved look,
+        // so it is deliberately not in OverlaySettings.
+        for destination in ExportOptions.Destination.allCases {
+            let encoded = try JSONEncoder().encode(destination)
+            #expect(try JSONDecoder().decode(ExportOptions.Destination.self,
+                                             from: encoded) == destination)
+        }
+    }
+
+    /// A file with no telemetry loses nothing by being replaced, so the warning
+    /// must not appear for one.
+    @Test func replacingAFileWithoutTelemetryLosesNothing() throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("gopull-test-\(UUID().uuidString).mp4")
+        try Data("not an mp4".utf8).write(to: url)
+        defer { try? FileManager.default.removeItem(at: url) }
+        #expect(!OverlayExporter.replacingLosesTelemetry(url))
+    }
+
+    @Test func replacingAMissingFileIsNotClaimedToLoseTelemetry() {
+        let missing = URL(fileURLWithPath: "/nowhere/at/all.mp4")
+        #expect(!OverlayExporter.replacingLosesTelemetry(missing))
+    }
+}

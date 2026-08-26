@@ -1,0 +1,67 @@
+#!/bin/zsh
+# Reads and bumps the project's semantic version.
+#
+# The version lives in one place -- MARKETING_VERSION in the Xcode project --
+# and everything else derives from it: CFBundleShortVersionString via
+# GENERATE_INFOPLIST_FILE, the string the app shows, and the git tag.
+#
+#   tools/version                 print the current version
+#   tools/version patch|minor|major   bump and write it back
+#   tools/version set 1.4.2       set an exact version
+#   tools/version tag             print the release tag command for HEAD
+#
+# Bumping also increments CURRENT_PROJECT_VERSION (the build number), which
+# must rise monotonically for macOS to treat a build as newer.
+
+set -e
+cd "$(dirname "$0")/.."
+PROJ="GoPull.xcodeproj/project.pbxproj"
+
+current() {
+    grep -m1 -E "^[[:space:]]*MARKETING_VERSION = " "$PROJ" \
+        | sed -E 's/.*MARKETING_VERSION = ([^;]*);.*/\1/'
+}
+
+# "1.0" and "1" are valid MARKETING_VERSIONs; normalise to three components.
+normalise() {
+    local v=$1
+    local n=$(print -- "$v" | awk -F. '{printf "%d.%d.%d", $1, ($2==""?0:$2), ($3==""?0:$3)}')
+    print -- "$n"
+}
+
+write() {
+    local new=$1
+    local build=$(( $(grep -m1 -E "^[[:space:]]*CURRENT_PROJECT_VERSION = " "$PROJ" \
+        | sed -E 's/.*= ([0-9]+);.*/\1/') + 1 ))
+    # Every target's configs, so the app and its test bundles stay in step.
+    sed -i '' -E "s/(MARKETING_VERSION = )[^;]*(;)/\1${new}\2/g" "$PROJ"
+    sed -i '' -E "s/(CURRENT_PROJECT_VERSION = )[0-9]+(;)/\1${build}\2/g" "$PROJ"
+    print -- "$new (build $build)"
+}
+
+case "${1:-show}" in
+    show)
+        normalise "$(current)"
+        ;;
+    major|minor|patch)
+        IFS=. read -r MA MI PA <<< "$(normalise "$(current)")"
+        case "$1" in
+            major) MA=$((MA+1)); MI=0; PA=0 ;;
+            minor) MI=$((MI+1)); PA=0 ;;
+            patch) PA=$((PA+1)) ;;
+        esac
+        write "$MA.$MI.$PA"
+        ;;
+    set)
+        [[ "$2" =~ '^[0-9]+\.[0-9]+\.[0-9]+$' ]] || { print -u2 "usage: tools/version set X.Y.Z"; exit 1 }
+        write "$2"
+        ;;
+    tag)
+        V=$(normalise "$(current)")
+        print "git tag -a v$V -m 'GoPull $V' && git push origin v$V"
+        ;;
+    *)
+        print -u2 "usage: tools/version [show|major|minor|patch|set X.Y.Z|tag]"
+        exit 1
+        ;;
+esac

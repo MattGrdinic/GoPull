@@ -20,6 +20,8 @@ struct GoPullApp: App {
         // The mount lives inside this process, so keep a menu bar presence:
         // the window can be closed without tearing the volume down.
         MenuBarExtra("GoPull", systemImage: "camera") {
+            Text("GoPull \(AppVersion.display)")
+            Divider()
             if model.isConnected {
                 Text(model.info?.model ?? "GoPro")
                 Divider()

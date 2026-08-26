@@ -120,3 +120,17 @@ MISSION 1 PRO, firmware `H26.01.02.02.00`, over USB to an Apple Silicon Mac.
 | Cancel a running import | stops in 0.05s, no `.part`, no partial clip |
 | Normal import after a cancel | completes, exact size, MD5 matches |
 | Orphan sweep with decoys | removes media `.part` only, nested included |
+| 11.5 GB clip, end to end | completes in 8m28s; previously failed at ~20% every time |
+| Spot-checks at 1/3/4/6/9 GiB offsets | byte-identical to the camera |
+| 1.16 GB clip after a cancel | MD5 identical to the camera |
+| Control API during an import | `media/list`, `DCIM/` and `keep_alive` all hit the 15s timeout |
+| Thumbnails + details, whole card | 12 clips in 1.04s, 0.6 MB total |
+| `AVURLAsset` against a `.LRV` on the camera | duration in 0.03s, midpoint frame in 0.01s |
+| Preview of an 11.54 GB 8K clip | plays its 364 MB proxy, nothing copied |
+| `VideoPlayer` from AVKit | crashes on open — see DECISIONS #24 |
+| Row selection with a double-click gesture | broken by `onTapGesture`, and by `contentShape` + `simultaneousGesture` |
+| Click row, cmd-click a second | both select; Import Selected enabled, Preview disabled |
+| Click a thumbnail | preview opens, selection untouched |
+| "Publishing changes from within view updates" | 56 per 4 row clicks before, 0 after |
+| Import Selected end to end | inode changes, size matches, selection clears |
+| Click name / subtitle / date / size / white space | all select identically |

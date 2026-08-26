@@ -16,6 +16,10 @@ GoPro Connect models.
 
 * **Mount as Drive** — the card appears at `~/GoPro-Camera`, read-only. Open clips directly in
   Resolve, QuickTime or Finder; seeking works properly.
+* **Preview before you copy** — every clip carries a thumbnail plus its duration, resolution
+  and frame rate, read from the camera. Double-click one to play it: the camera has a
+  low-resolution `.LRV` proxy beside every clip, so an 11.5 GB 8K recording previews from a
+  364 MB file that streams off the card without copying anything.
 * **Import** — copies new clips to `~/Movies/GoPro/<date>/` at ~51 MB/s using parallel range
   requests, with progress and transfer rate. Already-imported clips are detected and skipped.
 * **Folder options** — sort clips into date folders, per-camera folders, or both. Two bodies

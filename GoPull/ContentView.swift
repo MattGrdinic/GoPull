@@ -9,6 +9,19 @@ import UniformTypeIdentifiers
 struct ContentView: View {
     @EnvironmentObject private var model: AppModel
     @State private var choosingDestination = false
+    @State private var previewing: MediaFile?
+    /// Selection is owned by SwiftUI here, not read straight off the model.
+    ///
+    /// `List(selection:)` writes the new value back *while it is updating the
+    /// rows*. Pointed at a `@Published` property that means `objectWillChange`
+    /// fires mid-update -- "Publishing changes from within view updates is not
+    /// allowed, this will cause undefined behavior", 14 times per click on a
+    /// 12-row list. SwiftUI then re-runs the update, which is what made
+    /// clicking a second row feel slow or fail to highlight at all.
+    ///
+    /// The model is still the source of truth for everything else; the two are
+    /// mirrored below, in `onChange`, which runs *after* the update completes.
+    @State private var selection: Set<String> = []
 
     var body: some View {
         VStack(spacing: 0) {
@@ -138,12 +151,18 @@ struct ContentView: View {
     // MARK: - Files
 
     private var fileList: some View {
-        List(model.visibleFiles, selection: $model.selection) { file in
+        List(model.visibleFiles, selection: $selection) { file in
             HStack(spacing: 10) {
                 Image(systemName: model.alreadyImported(file)
                       ? "checkmark.circle.fill" : "circle.dashed")
                     .foregroundStyle(model.alreadyImported(file) ? .green : .secondary)
                     .help(model.alreadyImported(file) ? "Already imported" : "Not imported yet")
+
+                Button { preview(file) } label: { ClipThumbnail(file: file) }
+                    .buttonStyle(.plain)
+                    .disabled(model.importer.isRunning
+                              || model.previewSource(for: file) == nil)
+                    .help("Play a preview straight from the camera, without copying it")
 
                 VStack(alignment: .leading, spacing: 1) {
                     HStack(spacing: 5) {
@@ -155,9 +174,7 @@ struct ContentView: View {
                                 .background(.quaternary, in: Capsule())
                         }
                     }
-                    Text(model.devicesOnCard.count > 1
-                         ? "\(file.device.label) · \(file.folder)"
-                         : file.folder)
+                    Text(rowSubtitle(for: file))
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
                 }
@@ -176,9 +193,67 @@ struct ContentView: View {
                     .frame(width: 72, alignment: .trailing)
             }
             .padding(.vertical, 2)
+            // No tap gesture on the row, deliberately. Every spelling of
+            // double-click-to-preview cost something, and the last one was the
+            // subtlest: a gesture's hit area is the row's *content*, so clicks
+            // on the name and thumbnail went through gesture arbitration while
+            // clicks on the empty space beside them went straight to the List.
+            // Half the row selected crisply and half did not.
+            //
+            //   .onTapGesture(count: 2)       rows stop selecting at all
+            //   .contentShape + simultaneous  rows stop selecting at all
+            //   .simultaneousGesture alone    selection works, but only the
+            //                                 white space feels responsive
+            //
+            // Preview has three affordances that cost the row nothing: the
+            // thumbnail is a real Button, plus the Preview button and the
+            // context menu item. So the row itself does exactly one thing.
+            .contextMenu {
+                Button("Preview") { preview(file) }
+                    .disabled(model.importer.isRunning || model.previewSource(for: file) == nil)
+            }
             .tag(file.id)
         }
         .listStyle(.inset)
+        .onChange(of: selection) { _, new in
+            if model.selection != new { model.selection = new }
+        }
+        .onChange(of: model.selection) { _, new in
+            if selection != new { selection = new }
+        }
+        .sheet(item: $previewing) { file in
+            if let source = model.previewSource(for: file) {
+                ClipPreviewSheet(file: file, source: source,
+                                 details: model.previews.details[file.id])
+            }
+        }
+    }
+
+    /// Duration and resolution once the camera has told us, folder until then.
+    private func rowSubtitle(for file: MediaFile) -> String {
+        var parts: [String] = []
+        if model.devicesOnCard.count > 1 { parts.append(file.device.label) }
+        parts.append(file.folder)
+        if let summary = model.previews.details[file.id]?.summary, !summary.isEmpty {
+            parts.append(summary)
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    /// Previewing opens a fifth stream against a camera that is already
+    /// serving four, and an import is the operation worth protecting. Playback
+    /// waits until it finishes.
+    private func preview(_ file: MediaFile) {
+        guard !model.importer.isRunning, model.previewSource(for: file) != nil else { return }
+        previewing = file
+    }
+
+    /// The clip a Preview button would act on: the selection when it is a
+    /// single clip, so the button matches what the list is showing as chosen.
+    private var previewTarget: MediaFile? {
+        guard !model.importer.isRunning else { return nil }
+        guard selection.count == 1, let id = selection.first else { return nil }
+        return model.visibleFiles.first { $0.id == id && model.previewSource(for: $0) != nil }
     }
 
     // MARK: - Footer
@@ -246,8 +321,17 @@ struct ContentView: View {
                 if model.importer.isRunning {
                     Button("Cancel") { model.cancelImport() }
                 } else {
+                    Button {
+                        if let target = previewTarget { preview(target) }
+                    } label: {
+                        Label("Preview", systemImage: "play.rectangle")
+                    }
+                    .disabled(previewTarget == nil)
+                    .help("Play the camera's low-resolution proxy without copying anything. "
+                          + "Double-clicking a clip does the same.")
+
                     Button("Import Selected") { model.importSelected() }
-                    .disabled(model.selection.isEmpty)
+                    .disabled(selection.isEmpty)
 
                     Button {
                         model.importNew()

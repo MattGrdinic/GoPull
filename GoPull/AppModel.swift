@@ -44,6 +44,7 @@ final class AppModel: ObservableObject {
     static let shared = AppModel()
 
     let importer = Importer()
+    let previews = PreviewStore()
     let mountPoint = MountController.defaultMountPoint
 
     private let server = WebDAVServer()
@@ -154,6 +155,18 @@ final class AppModel: ObservableObject {
         guard !Task.isCancelled else { return }
         isMounted = await Self.mountedOffMain(mountPoint)
 
+        // Nothing may touch the camera's control API while an import is
+        // running. Measured on a MISSION 1 PRO: with the importer's four range
+        // streams in flight, /gopro/media/list, /videos/DCIM/ and even
+        // /gopro/camera/keep_alive all take the full 15s timeout and fail. That
+        // made three consecutive polls "miss", which cancelled the import and
+        // reported it as an unplugged camera -- so any clip long enough to span
+        // ~50s of transfer could never finish, while short ones always did.
+        //
+        // The import is its own liveness check: if the camera really goes away
+        // its chunk requests fail, and `Importer` reports that directly.
+        if importer.isRunning { return }
+
         if camera == nil {
             camera = try? await GoProCamera.discover()
         }
@@ -182,6 +195,7 @@ final class AppModel: ObservableObject {
             cameraIP = camera.ip
             files = tree.keys.sorted().flatMap { tree[$0] ?? [] }
             freeBytes = free
+            previews.update(cameraIP: camera.ip)
             selection = selection.filter { id in files.contains { $0.id == id } }
 
             server.update(CardSnapshot(cameraIP: camera.ip,
@@ -195,6 +209,12 @@ final class AppModel: ObservableObject {
             // apart: a camera that has gone, versus a camera that is present
             // but has no readable card in it.
             if await camera.keepAlive() {
+                // The camera answered, so it is present. Only a clean refusal
+                // from the card endpoints means there is no card -- a timeout
+                // or a dropped connection just means the link was busy, and
+                // throwing away the file list over one of those made the whole
+                // window flicker between "no card" and normal.
+                guard error is CameraError else { return }
                 info = camera.info
                 cameraIP = camera.ip
                 files = []
@@ -310,6 +330,12 @@ final class AppModel: ObservableObject {
                                 cameraFolder: deviceFolder(for: file))
     }
 
+    /// What a preview would show for this clip: the low-resolution proxy when
+    /// the card has one, otherwise the clip itself.
+    func previewSource(for file: MediaFile) -> PreviewSource? {
+        MediaPreview.source(for: file, among: files, cameraIP: cameraIP)
+    }
+
     /// True when this clip is already sitting in the destination at full size.
     func alreadyImported(_ file: MediaFile) -> Bool {
         guard let size = try? FileManager.default
@@ -349,8 +375,12 @@ final class AppModel: ObservableObject {
         // state a leftover .part leaves behind, so it must still be cleaned.
         removeOrphanedParts()
         guard !chosen.isEmpty else { return }
+        // Thumbnail requests go to the same control API that stops answering
+        // under an import's range streams, so they stand down too.
+        previews.suspend()
         importTask = Task { [weak self] in
             await self?.importFiles(chosen)
+            self?.previews.resume()
             self?.importTask = nil
         }
     }
@@ -384,6 +414,10 @@ final class AppModel: ObservableObject {
         if failures.isEmpty {
             errorMessage = nil
             selection.removeAll()
+        } else if failures.allSatisfy({ ($0.1 as? ImportError)?.isCancellation == true }) {
+            // Either the user pressed Cancel or a real disconnect cancelled us,
+            // and that path posts its own note. Neither warrants an alert.
+            errorMessage = nil
         } else if failures.contains(where: { ($0.1 as? ImportError)?.isDisconnect == true }) {
             errorMessage = "The camera was disconnected — the import stopped after "
                          + "\(chosen.count - failures.count) of \(chosen.count) clip(s). "

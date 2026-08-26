@@ -132,6 +132,40 @@ cancelling an import made the app conclude the camera had vanished, which also f
 auto-eject path. Any handler that infers *state of the world* from a failed await must rule out
 cancellation first.
 
+**Never touch the camera's control API during an import.** With the importer's four range
+streams in flight, `/gopro/media/list`, `/videos/DCIM/` *and* `/gopro/camera/keep_alive` all take
+the full 15s timeout and fail. Three of those in a row used to trip `handleMissedPoll()`, which
+cancelled the import and reported it as an unplugged camera — so every clip longer than ~50s of
+transfer failed while short ones worked. `refresh()` now returns early on `importer.isRunning`;
+the import is its own liveness check. A cheap `keepAlive()` ping is *not* a safe substitute.
+
+**`import AVKit` does not link `AVKit.framework`.** It autolinks the `_AVKit_SwiftUI` shim only,
+so SwiftUI's `VideoPlayer` crashes on first render with `SIGABRT` in `getSuperclassMetadata`.
+`PreviewWindow.swift` wraps `AVPlayerView` directly, which is a hard symbol reference and pulls
+AVKit in. Check `otool -L` before suspecting SwiftUI.
+
+**Never bind a `@Published` property to `List(selection:)`.** The List writes the new value back
+*while it is updating rows*, so `objectWillChange` fires mid-update: "Publishing changes from
+within view updates is not allowed" — 14 times per click on a 12-row list, and SwiftUI then
+re-runs the update, which is what made clicking a second row feel slow or not highlight at all.
+`ContentView` keeps selection in `@State` and mirrors it to `AppModel.selection` in `onChange`,
+which runs after the update. Measure it: `log show --predicate 'eventMessage CONTAINS "Publishing
+changes"'` — it must be 0.
+
+**No gestures on a `List` row — put clickable things in a `Button`.** Selecting clips and
+double-clicking one to preview compete for the same click. `.onTapGesture(count: 2)` stops
+selection entirely (it outranks the gesture `List(selection:)` uses), and so does
+`.contentShape(Rectangle())`. `.simultaneousGesture` alone keeps selection working but only over
+the row's *content*, so the name and thumbnail arbitrate the click while the white space beside
+them does not — half the row feels responsive and half does not. The row now carries no gesture;
+the thumbnail is a real `Button`, which handles its own click and leaves selection alone. All of
+this breaks silently, and none of it reproduces under synthesised clicks — check by clicking every
+region of a row by hand.
+
+**Preview traffic is import traffic.** Thumbnails and `/gopro/media/info` use the same control
+API that must stay untouched during an import, and playback would be a fifth stream. `PreviewStore`
+suspends and `ContentView` disables preview while `importer.isRunning`.
+
 **Camera present with no card looks like no camera.** `/gopro/media/list` fails either way.
 `refresh()` disambiguates with `keepAlive()`; don't collapse those branches.
 

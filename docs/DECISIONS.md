@@ -313,3 +313,195 @@ cause — I wrote it for the case I was imagining rather than the case that prod
 
 **Safety.** Only `<name>.<media-ext>.part` is removed, so an unrelated `notes.txt.part` or
 `archive.zip.part` in the same folder is left alone — verified with decoys.
+
+---
+
+## 21. Polling stands down completely while an import runs
+
+**Decision.** `refresh()` returns immediately when `importer.isRunning`. During an import the app
+does not call `cardTree()`, `freeBytes()` or even `keepAlive()`. The import is its own liveness
+check.
+
+**The bug this fixes.** Any clip that took longer than about 50 seconds to transfer failed, every
+time, with *"The camera was disconnected — the import stopped after 0 of 1 clip(s)."* Short clips
+always worked. The camera was never disconnected.
+
+**What was actually happening**, measured on a MISSION 1 PRO with an 11.5 GB clip:
+
+```
+GET /gopro/media/list      -> URLError -1001 timed out after 15.16s
+GET /videos/DCIM/          -> URLError -1001 timed out after 15.00s
+GET /gopro/camera/keep_alive -> URLError -1001 timed out after 15.01s   <- camera dropped
+handleMissedPoll: missedPolls=1 ... =2 ... =3                           <- cancelImport()
+GET /gopro/camera/keep_alive -> URLError -999 cancelled in 0.00s        <- reported as disconnect
+```
+
+With the importer's four range streams in flight, the camera's control API stops answering
+altogether. Three consecutive 15s timeouts is roughly 50 seconds, which is exactly the threshold
+where clips started failing — and why the failure looked size-dependent. `cancelImport()` then
+cancelled the import, and the cancelled task made `Importer`'s own `keepAlive()` fail instantly,
+which `run()` read as "the camera has gone".
+
+So the app killed its own imports and then blamed the cable.
+
+**Why a cheap ping was not enough.** The first attempt kept polling but reduced it to a single
+`keepAlive()`. The trace above shows why that fails too: `keep_alive` takes the full 15s timeout
+under load just like the card scan does. Nothing may touch the control API during an import.
+
+**Why giving up liveness detection is safe.** A camera that really is unplugged makes the
+importer's own chunk requests fail, and `run()` already distinguishes that case and reports it.
+Polling resumes the moment the import ends, so the auto-eject path in
+[#14](#14-eject-the-volume-when-the-camera-disappears-after-a-delay) still fires — just from the
+next poll rather than during the transfer.
+
+**The general lesson**, and it is the same one as [#19](#19-a-cancelled-task-must-not-be-allowed-to-report-a-missing-camera):
+a timeout means *"no answer"*, not *"not there"*. Watchdogs that share a contended resource with
+the work they are watching will eventually shoot it.
+
+---
+
+## 22. `pwrite` results are checked
+
+**Decision.** Chunks go through `writeFully()`, which loops on short writes, retries `EINTR` and
+throws `ImportError.writeFailed` on error.
+
+**Why.** The write was `_ = pwrite(descriptor, raw.baseAddress, raw.count, off_t(start))` — both
+the short-write and the `-1` return were discarded. The completeness check afterwards compared the
+file's length against `file.size`, but `ftruncate` had already set that length, so it passed no
+matter how many bytes actually landed. A destination that filled up mid-import produced a
+full-length, correctly-named, quietly corrupt clip. The check now counts the bytes the chunks
+delivered instead.
+
+---
+
+## 23. Preview plays the camera's proxy, and copies nothing
+
+**Decision.** Double-clicking a clip streams it straight off the camera, playing the `.LRV`
+proxy that sits beside it on the card rather than the original. Rows also carry a thumbnail and
+the camera's own duration, resolution and frame rate.
+
+**Why this is nearly free.** The camera already has everything needed, and none of it is the
+clip:
+
+| endpoint | cost, measured |
+|---|---|
+| `/gopro/media/thumbnail?path=…` | 60 KB JPEG in ~30ms |
+| `/gopro/media/info?path=…` | duration, `w`/`h`, `fps`, and `ls` — the proxy's length |
+| whole card, 12 clips | 0.6 MB and 1.04s, thumbnails and details together |
+
+And the file server sends `Content-Type: video/mp4` with `Accept-Ranges: bytes`, so AVPlayer
+seeks against a file on the card without downloading it. Loading `GL010005.LRV` and decoding a
+frame from its midpoint takes 0.03s and 0.01s. The proxy is 364 MB and 960x540 against a 10.7 GB
+8K original — playable over USB, where the original would not be.
+
+**Proxies are matched, not constructed.** GoPro names a clip `GX010005.MP4` and its proxy
+`GL010005.LRV`. Rather than rebuild that name and hope, `MediaPreview.proxy(for:among:)` matches
+the digits against the files actually on the card, which also covers the `GH`/`GS` prefixes older
+bodies use and simply finds nothing for a clip written by another device — which then previews at
+full resolution instead.
+
+**Preview stands down during an import**, both halves of it: thumbnail requests go to the same
+control API that [#21](#21-polling-stands-down-completely-while-an-import-runs) is about, and
+playback would open a fifth stream against a camera already serving four. The import wins.
+
+---
+
+## 24. `import AVKit` does not link AVKit
+
+**Decision.** The player is `AVPlayerView` wrapped in an `NSViewRepresentable`, not SwiftUI's
+`VideoPlayer`.
+
+**Why, and it is not a preference.** `VideoPlayer` crashed the app with `SIGABRT` the instant the
+sheet opened:
+
+```
+swift::fatalError
+getSuperclassMetadata
+_swift_initClassMetadataImpl
+_AVKit_SwiftUI  0x1974
+```
+
+`import AVKit` autolinks the `_AVKit_SwiftUI` shim but **not `AVKit.framework` itself** —
+confirmed with `otool -L`, and confirmed again in the crash report, where `_AVKit_SwiftUI` is
+among the loaded images and `AVKit` is not. So `VideoPlayer` resolved its own shim and then died
+looking for `AVPlayerView`'s metadata.
+
+Naming `AVPlayerView` in our own code is a hard symbol reference, so the linker brings AVKit
+along — `otool -L` now lists it. That also gets the real transport bar (scrubbing, volume,
+full-screen) instead of rebuilding one.
+
+**If you ever see `getSuperclassMetadata` in a crash**, check `otool -L` before anything else.
+The symptom looks like a SwiftUI bug and is a missing link.
+
+---
+
+## 25. The preview affordance is a Button, not a gesture on the row
+
+**Decision.** The thumbnail is a real `Button`. Double-click via `simultaneousGesture` is kept as
+a convenience, but it is not what the feature rests on.
+
+**Why, and this shipped broken once.** Adding preview cost the ability to select clips to import,
+which is the app's main job. Three spellings, all tried against the running app:
+
+| on the row | selection | double-click |
+|---|---|---|
+| `.onTapGesture(count: 2)` | **broken** | works |
+| `.contentShape` + `.simultaneousGesture` | **broken** | works |
+| `.simultaneousGesture` alone | works, but only evenly on white space | only over real content |
+| **nothing** (the shipped answer) | works everywhere | n/a |
+
+A tap gesture on a row outranks the gesture `List(selection:)` relies on, and `contentShape`
+loses the click the same way by reshaping the row's hit area.
+
+`simultaneousGesture` alone looked like the answer and was not. A gesture's hit area is the row's
+**content**, so clicks on the name and thumbnail went through gesture arbitration while clicks on
+the empty space beside them went straight to the List. Half the row felt crisp and half did not —
+reported from use as "clicking the labels fails, clicking white areas works", which is exactly the
+shape of that hit area. It did not reproduce under synthesised clicks; real mouse input is
+arbitrated differently.
+
+So the row carries no gesture at all. Preview has three affordances that cost the row nothing: the
+thumbnail is a real `Button`, plus the Preview button and the context menu item.
+
+**It fails silently.** No warning, no crash, no visual difference — rows simply stop highlighting,
+or highlight only on part of their area. Anything added to a row has to be checked by clicking
+every region of one.
+
+---
+
+## 26. Selection lives in `@State`, mirrored to the model
+
+**Decision.** `ContentView` owns `@State private var selection`, binds *that* to
+`List(selection:)`, and mirrors it to `AppModel.selection` in `onChange`. The model stays the
+source of truth for importing; it just is not what the List writes into directly.
+
+**The bug.** Clicking a row logged *"Publishing changes from within view updates is not allowed,
+this will cause undefined behavior"* — **14 times per click** on a 12-row list. Selecting a second
+row was slow, or the row never highlighted.
+
+`List(selection:)` writes the new selection back through the binding *during* its update pass.
+Pointed at `@Published var selection`, that fires `objectWillChange` mid-update, SwiftUI discards
+and re-runs the update, and the result is the lag.
+
+**It was not the preview feature**, though it surfaced alongside it. Building the commit *before*
+preview existed and clicking rows produced the same warnings, which is the check worth doing
+before rewriting the thing you touched last.
+
+**Measured, on the same four clicks:**
+
+| | warnings |
+|---|---|
+| `List(selection: $model.selection)` | 56 |
+| `@State` + `onChange` mirror | **0** |
+
+`onChange` runs after the update completes, so the model write is no longer inside it.
+
+**Verifying this needs the log, not the console.** SwiftUI runtime issues go to the unified log,
+not stderr:
+
+```bash
+log show --last 5m --predicate 'eventMessage CONTAINS "Publishing changes"' --style compact
+```
+
+Under Xcode the same warning can pause the app, which is why it looks far worse there than in a
+standalone run.

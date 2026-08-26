@@ -154,6 +154,18 @@ final class AppModel: ObservableObject {
         guard !Task.isCancelled else { return }
         isMounted = await Self.mountedOffMain(mountPoint)
 
+        // Nothing may touch the camera's control API while an import is
+        // running. Measured on a MISSION 1 PRO: with the importer's four range
+        // streams in flight, /gopro/media/list, /videos/DCIM/ and even
+        // /gopro/camera/keep_alive all take the full 15s timeout and fail. That
+        // made three consecutive polls "miss", which cancelled the import and
+        // reported it as an unplugged camera -- so any clip long enough to span
+        // ~50s of transfer could never finish, while short ones always did.
+        //
+        // The import is its own liveness check: if the camera really goes away
+        // its chunk requests fail, and `Importer` reports that directly.
+        if importer.isRunning { return }
+
         if camera == nil {
             camera = try? await GoProCamera.discover()
         }
@@ -195,6 +207,12 @@ final class AppModel: ObservableObject {
             // apart: a camera that has gone, versus a camera that is present
             // but has no readable card in it.
             if await camera.keepAlive() {
+                // The camera answered, so it is present. Only a clean refusal
+                // from the card endpoints means there is no card -- a timeout
+                // or a dropped connection just means the link was busy, and
+                // throwing away the file list over one of those made the whole
+                // window flicker between "no card" and normal.
+                guard error is CameraError else { return }
                 info = camera.info
                 cameraIP = camera.ip
                 files = []
@@ -384,6 +402,10 @@ final class AppModel: ObservableObject {
         if failures.isEmpty {
             errorMessage = nil
             selection.removeAll()
+        } else if failures.allSatisfy({ ($0.1 as? ImportError)?.isCancellation == true }) {
+            // Either the user pressed Cancel or a real disconnect cancelled us,
+            // and that path posts its own note. Neither warrants an alert.
+            errorMessage = nil
         } else if failures.contains(where: { ($0.1 as? ImportError)?.isDisconnect == true }) {
             errorMessage = "The camera was disconnected — the import stopped after "
                          + "\(chosen.count - failures.count) of \(chosen.count) clip(s). "

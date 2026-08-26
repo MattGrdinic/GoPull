@@ -120,3 +120,7 @@ MISSION 1 PRO, firmware `H26.01.02.02.00`, over USB to an Apple Silicon Mac.
 | Cancel a running import | stops in 0.05s, no `.part`, no partial clip |
 | Normal import after a cancel | completes, exact size, MD5 matches |
 | Orphan sweep with decoys | removes media `.part` only, nested included |
+| 11.5 GB clip, end to end | completes in 8m28s; previously failed at ~20% every time |
+| Spot-checks at 1/3/4/6/9 GiB offsets | byte-identical to the camera |
+| 1.16 GB clip after a cancel | MD5 identical to the camera |
+| Control API during an import | `media/list`, `DCIM/` and `keep_alive` all hit the 15s timeout |

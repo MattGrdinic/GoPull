@@ -313,3 +313,61 @@ cause — I wrote it for the case I was imagining rather than the case that prod
 
 **Safety.** Only `<name>.<media-ext>.part` is removed, so an unrelated `notes.txt.part` or
 `archive.zip.part` in the same folder is left alone — verified with decoys.
+
+---
+
+## 21. Polling stands down completely while an import runs
+
+**Decision.** `refresh()` returns immediately when `importer.isRunning`. During an import the app
+does not call `cardTree()`, `freeBytes()` or even `keepAlive()`. The import is its own liveness
+check.
+
+**The bug this fixes.** Any clip that took longer than about 50 seconds to transfer failed, every
+time, with *"The camera was disconnected — the import stopped after 0 of 1 clip(s)."* Short clips
+always worked. The camera was never disconnected.
+
+**What was actually happening**, measured on a MISSION 1 PRO with an 11.5 GB clip:
+
+```
+GET /gopro/media/list      -> URLError -1001 timed out after 15.16s
+GET /videos/DCIM/          -> URLError -1001 timed out after 15.00s
+GET /gopro/camera/keep_alive -> URLError -1001 timed out after 15.01s   <- camera dropped
+handleMissedPoll: missedPolls=1 ... =2 ... =3                           <- cancelImport()
+GET /gopro/camera/keep_alive -> URLError -999 cancelled in 0.00s        <- reported as disconnect
+```
+
+With the importer's four range streams in flight, the camera's control API stops answering
+altogether. Three consecutive 15s timeouts is roughly 50 seconds, which is exactly the threshold
+where clips started failing — and why the failure looked size-dependent. `cancelImport()` then
+cancelled the import, and the cancelled task made `Importer`'s own `keepAlive()` fail instantly,
+which `run()` read as "the camera has gone".
+
+So the app killed its own imports and then blamed the cable.
+
+**Why a cheap ping was not enough.** The first attempt kept polling but reduced it to a single
+`keepAlive()`. The trace above shows why that fails too: `keep_alive` takes the full 15s timeout
+under load just like the card scan does. Nothing may touch the control API during an import.
+
+**Why giving up liveness detection is safe.** A camera that really is unplugged makes the
+importer's own chunk requests fail, and `run()` already distinguishes that case and reports it.
+Polling resumes the moment the import ends, so the auto-eject path in
+[#14](#14-eject-the-volume-when-the-camera-disappears-after-a-delay) still fires — just from the
+next poll rather than during the transfer.
+
+**The general lesson**, and it is the same one as [#19](#19-a-cancelled-task-must-not-be-allowed-to-report-a-missing-camera):
+a timeout means *"no answer"*, not *"not there"*. Watchdogs that share a contended resource with
+the work they are watching will eventually shoot it.
+
+---
+
+## 22. `pwrite` results are checked
+
+**Decision.** Chunks go through `writeFully()`, which loops on short writes, retries `EINTR` and
+throws `ImportError.writeFailed` on error.
+
+**Why.** The write was `_ = pwrite(descriptor, raw.baseAddress, raw.count, off_t(start))` — both
+the short-write and the `-1` return were discarded. The completeness check afterwards compared the
+file's length against `file.size`, but `ftruncate` had already set that length, so it passed no
+matter how many bytes actually landed. A destination that filled up mid-import produced a
+full-length, correctly-named, quietly corrupt clip. The check now counts the bytes the chunks
+delivered instead.

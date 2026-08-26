@@ -132,6 +132,13 @@ cancelling an import made the app conclude the camera had vanished, which also f
 auto-eject path. Any handler that infers *state of the world* from a failed await must rule out
 cancellation first.
 
+**Never touch the camera's control API during an import.** With the importer's four range
+streams in flight, `/gopro/media/list`, `/videos/DCIM/` *and* `/gopro/camera/keep_alive` all take
+the full 15s timeout and fail. Three of those in a row used to trip `handleMissedPoll()`, which
+cancelled the import and reported it as an unplugged camera — so every clip longer than ~50s of
+transfer failed while short ones worked. `refresh()` now returns early on `importer.isRunning`;
+the import is its own liveness check. A cheap `keepAlive()` ping is *not* a safe substitute.
+
 **Camera present with no card looks like no camera.** `/gopro/media/list` fails either way.
 `refresh()` disambiguates with `keepAlive()`; don't collapse those branches.
 

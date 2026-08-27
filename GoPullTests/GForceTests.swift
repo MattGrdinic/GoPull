@@ -121,11 +121,15 @@ struct GForceTests {
 
     /// Scaling from the raw signal put full scale at 4 g on the strength of one
     /// bump, leaving the ball parked in the middle for the whole ride.
-    @Test func fullScaleIsARoundNumberAboveThePeak() {
+    /// A bike or a car does not pull past about 1 g, so the range stops at 1.5
+    /// however wild a single bump looks.
+    @Test func fullScaleIsARoundNumberAndNeverAbsurd() {
         #expect(GForceConfig.niceMaximum(above: 1.01) == 1.5)
         #expect(GForceConfig.niceMaximum(above: 0.3) == 0.5)
-        #expect(GForceConfig.niceMaximum(above: 2.82) == 4.0)
-        for peak in stride(from: 0.1, to: 3.5, by: 0.1) {
+        #expect(GForceConfig.niceMaximum(above: 0.6) == 0.75)
+        #expect(GForceConfig.niceMaximum(above: 2.82) == GForceConfig.ceiling)
+        #expect(GForceConfig.niceMaximum(above: 99) == GForceConfig.ceiling)
+        for peak in stride(from: 0.1, to: 1.3, by: 0.1) {
             #expect(GForceConfig.niceMaximum(above: peak) >= peak)
         }
     }

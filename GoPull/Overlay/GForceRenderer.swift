@@ -93,12 +93,20 @@ struct GForceConfig: Equatable, Codable {
         self.style = .matching(preset)
     }
 
-    /// A round full scale above what the clip actually pulled.
+    /// A round full scale above what the clip actually pulled, capped at 1.5 g.
+    ///
+    /// A motorcycle or car does not pull much beyond 1 g on any axis, and 1.5 is
+    /// already generous. Letting the range follow the data further meant one
+    /// bump — the accelerometer's raw peak on the test ride is 2.82 g — set full
+    /// scale to 4 g and the ball then never left the middle. Readings past the
+    /// outer ring still print truthfully; only the ball stops.
+    static let ceiling = 1.5
+
     static func niceMaximum(above g: Double) -> Double {
-        for candidate in [0.5, 1.0, 1.5, 2.0, 3.0, 4.0] where candidate >= g * 1.1 {
+        for candidate in [0.5, 0.75, 1.0, 1.5] where candidate >= g * 1.1 {
             return candidate
         }
-        return max(1.0, (g * 1.2).rounded(.up))
+        return ceiling
     }
 }
 
@@ -149,14 +157,24 @@ enum GForceRenderer {
         }
         context.setShadow(offset: .zero, blur: 0, color: nil)
 
-        /// g to a point on the target.
+        /// g to a point on the target, held at the outer ring.
+        ///
+        /// Without the clamp a spike puts the ball outside the dial, where the
+        /// clip region still lets it draw — a dot floating on the footage with
+        /// nothing around it.
         func place(_ sample: GForceSample) -> CGPoint {
-            let scale = radius * 0.86 / maxG
-            let x = centre.x + sample.lateral * scale
+            let reach = radius * 0.86
+            let scale = reach / maxG
+            var x = sample.lateral * scale
+            var y = sample.longitudinal * scale
+            let distance = (x * x + y * y).squareRoot()
+            if distance > reach, distance > 0 {
+                x *= reach / distance
+                y *= reach / distance
+            }
             // Braking is negative longitudinal and should pull the ball down,
             // and Core Graphics y goes up, so the sign works out directly.
-            let y = centre.y + sample.longitudinal * scale
-            return CGPoint(x: x, y: y)
+            return CGPoint(x: centre.x + x, y: centre.y + y)
         }
 
         // Rings at each whole or half g that fits.

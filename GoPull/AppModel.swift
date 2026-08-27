@@ -61,6 +61,25 @@ final class AppModel: ObservableObject {
     @Published private(set) var overlayExportResult: URL?
     @Published var overlayExportError: String?
 
+    // MARK: - Browsing
+
+    @Published var filter: MediaFilter = .all {
+        didSet { UserDefaults.standard.set(filter.rawValue, forKey: "browseFilter") }
+    }
+    @Published var sort: MediaSort = .newest {
+        didSet { UserDefaults.standard.set(sort.rawValue, forKey: "browseSort") }
+    }
+    @Published var groupsByDate: Bool {
+        didSet { UserDefaults.standard.set(groupsByDate, forKey: "groupsByDate") }
+    }
+    /// Thumbnail height in points.
+    @Published var thumbnailSize: Double {
+        didSet { UserDefaults.standard.set(thumbnailSize, forKey: "thumbnailSize") }
+    }
+    @Published var search: String = ""
+    /// Shots whose raw file the user does not want copied.
+    @Published private(set) var rawExcluded: Set<String> = []
+
     /// Convert each imported .GPR into a .DNG.
     @Published var convertGPRToDNG: Bool {
         didSet { UserDefaults.standard.set(convertGPRToDNG, forKey: "convertGPRToDNG") }
@@ -101,12 +120,19 @@ final class AppModel: ObservableObject {
                 .appendingPathComponent("Movies/GoPro")
         }
         overlaysAfterImport = defaults.object(forKey: "overlaysAfterImport") as? Bool ?? false
+        groupsByDate = defaults.object(forKey: "groupsByDate") as? Bool ?? true
+        thumbnailSize = defaults.object(forKey: "thumbnailSize") as? Double ?? 36
         convertGPRToDNG = defaults.object(forKey: "convertGPRToDNG") as? Bool ?? false
         replaceGPRWithDNG = defaults.object(forKey: "replaceGPRWithDNG") as? Bool ?? false
         organiseByDate = defaults.object(forKey: "organiseByDate") as? Bool ?? true
         separateByCamera = defaults.object(forKey: "separateByCamera") as? Bool ?? false
         includeSidecars = defaults.object(forKey: "includeSidecars") as? Bool ?? false
         isMounted = MountController.isMounted(at: mountPoint)
+
+        if let raw = defaults.string(forKey: "browseFilter"),
+           let value = MediaFilter(rawValue: raw) { filter = value }
+        if let raw = defaults.string(forKey: "browseSort"),
+           let value = MediaSort(rawValue: raw) { sort = value }
     }
 
     // MARK: - Camera identity
@@ -568,6 +594,71 @@ final class AppModel: ObservableObject {
         includeSidecars ? files : files.filter { !$0.isSidecar }
     }
 
+    // MARK: - Rows
+
+    /// The card as shots rather than files, filtered, searched and sorted.
+    var rows: [MediaRow] {
+        let all = MediaBrowser.rows(from: visibleFiles).filter { filter.matches($0) }
+        return MediaBrowser.sorted(MediaBrowser.matching(all, search: search), by: sort)
+    }
+
+    var sections: [MediaSection] {
+        groupsByDate ? MediaBrowser.sections(rows) : [MediaSection(id: "all", title: "", rows: rows)]
+    }
+
+    /// Whether this shot's raw file gets copied. On unless switched off.
+    func includesRaw(_ row: MediaRow) -> Bool {
+        row.hasRaw && !rawExcluded.contains(row.id)
+    }
+
+    func setIncludesRaw(_ include: Bool, for row: MediaRow) {
+        if include { rawExcluded.remove(row.id) } else { rawExcluded.insert(row.id) }
+    }
+
+    /// The files a row would import, honouring its raw toggle.
+    func files(for row: MediaRow) -> [MediaFile] {
+        row.files(includingRaw: includesRaw(row))
+    }
+
+    func rows(withIDs ids: Set<String>) -> [MediaRow] {
+        rows.filter { ids.contains($0.id) }
+    }
+
+    /// A row counts as imported only when everything it would copy is there.
+    func alreadyImported(_ row: MediaRow) -> Bool {
+        files(for: row).allSatisfy { alreadyImported($0) }
+    }
+
+    var newRows: [MediaRow] { rows.filter { !alreadyImported($0) } }
+
+    /// A section's size, honouring each row's raw toggle.
+    ///
+    /// `MediaSection.totalBytes` counts the raw every time because it knows
+    /// nothing about the toggles; using it in the header made a date say 254.6
+    /// MB while the strip above said 249.5 MB.
+    func bytes(of section: MediaSection) -> Int64 {
+        section.rows.reduce(0) { $0 + $1.size(includingRaw: includesRaw($1)) }
+    }
+
+    /// What Import Selected would copy, for the footer.
+    func selectionSummary(_ ids: Set<String>) -> (count: Int, bytes: Int64) {
+        let chosen = rows(withIDs: ids)
+        return (chosen.count, chosen.reduce(0) { $0 + $1.size(includingRaw: includesRaw($1)) })
+    }
+
+    func importRows(_ chosen: [MediaRow]) {
+        startImport(chosen.flatMap { files(for: $0) })
+    }
+
+    /// Opens the folder the next import would land in, making it whether or not
+    /// anything has been copied there yet.
+    func revealImportDestination() {
+        let target = files.first.map { destinationURL(for: $0).deletingLastPathComponent() }
+            ?? destination
+        try? FileManager.default.createDirectory(at: target, withIntermediateDirectories: true)
+        NSWorkspace.shared.activateFileViewerSelecting([target])
+    }
+
     var newFiles: [MediaFile] { visibleFiles.filter { !alreadyImported($0) } }
 
     func selectNew() {
@@ -575,11 +666,11 @@ final class AppModel: ObservableObject {
     }
 
     func importSelected() {
-        startImport(visibleFiles.filter { selection.contains($0.id) })
+        importRows(rows(withIDs: selection))
     }
 
     func importNew() {
-        startImport(newFiles)
+        importRows(newRows)
     }
 
     func cancelImport() {
@@ -588,7 +679,7 @@ final class AppModel: ObservableObject {
 
     /// Held so the Cancel button and a disconnect can actually stop the work --
     /// awaiting `run` directly left nothing to cancel.
-    private func startImport(_ chosen: [MediaFile]) {
+    func startImport(_ chosen: [MediaFile]) {
         guard importTask == nil else { return }
         // Sweep before the empty check: "nothing new to import" is exactly the
         // state a leftover .part leaves behind, so it must still be cleaned.

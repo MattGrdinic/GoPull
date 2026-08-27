@@ -33,6 +33,8 @@ struct ContentView: View {
                 if model.visibleFiles.isEmpty {
                     emptyCard
                 } else {
+                    controlStrip
+                    Divider()
                     fileList
                 }
                 Divider()
@@ -64,7 +66,10 @@ struct ContentView: View {
                 Text(model.info?.model ?? "No camera connected")
                     .font(.headline)
                 if model.isConnected {
-                    Text("\(model.cameraIP) · \(model.visibleFiles.count) file\(model.visibleFiles.count == 1 ? "" : "s") · \(model.totalBytes.byteLabel) used · \(model.freeBytes.byteLabel) free"
+                    // Counts live in the control strip, which knows about
+                    // filtering; two different totals on one screen only ever
+                    // disagreed.
+                    Text("\(model.cameraIP) · \(model.totalBytes.byteLabel) used · \(model.freeBytes.byteLabel) free"
                          + (model.devicesOnCard.count > 1
                             ? " · " + model.devicesOnCard.map(\.brand).joined(separator: ", ")
                             : ""))
@@ -151,94 +156,91 @@ struct ContentView: View {
 
     // MARK: - Files
 
-    private var fileList: some View {
-        List(model.visibleFiles, selection: $selection) { file in
-            HStack(spacing: 10) {
-                Image(systemName: model.alreadyImported(file)
-                      ? "checkmark.circle.fill" : "circle.dashed")
-                    .foregroundStyle(model.alreadyImported(file) ? .green : .secondary)
-                    .help(model.alreadyImported(file) ? "Already imported" : "Not imported yet")
+    /// Filter, search, sort and size, above the list rather than crowded into
+    /// the footer with the import options.
+    private var controlStrip: some View {
+        HStack(spacing: 12) {
+            Picker("", selection: $model.filter) {
+                ForEach(MediaFilter.allCases) { Text($0.label).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(width: 210)
 
-                // Which clips want a speedometer on them. On by default, so a
-                // card of one kind of footage needs no attention; the point is
-                // turning it off for the few that do not.
-                Toggle("", isOn: Binding(
-                    get: { model.overlaysEnabled(for: file) },
-                    set: { model.setOverlaysEnabled($0, for: file) }))
-                    .toggleStyle(.checkbox)
-                    .labelsHidden()
-                    .disabled(!model.canOverlay(file))
-                    .opacity(model.canOverlay(file) ? 1 : 0.25)
-                    .help(model.canOverlay(file)
-                          ? "Give this clip an overlay when overlays are generated"
-                          : "Overlays only apply to video")
-
-                Button { preview(file) } label: { ClipThumbnail(file: file) }
-                    .buttonStyle(.plain)
-                    .disabled(model.importer.isRunning
-                              || model.previewSource(for: file) == nil)
-                    .help("Play a preview straight from the camera, without copying it")
-
-                VStack(alignment: .leading, spacing: 1) {
-                    HStack(spacing: 5) {
-                        Text(file.name)
-                        if file.isSidecar {
-                            Text("proxy")
-                                .font(.caption2)
-                                .padding(.horizontal, 4).padding(.vertical, 1)
-                                .background(.quaternary, in: Capsule())
-                        }
+            HStack(spacing: 4) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(.tertiary).font(.caption)
+                TextField("Search", text: $model.search)
+                    .textFieldStyle(.plain)
+                    .font(.callout)
+                if !model.search.isEmpty {
+                    Button {
+                        model.search = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill").foregroundStyle(.tertiary)
                     }
-                    Text(rowSubtitle(for: file))
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
+                    .buttonStyle(.plain)
                 }
+            }
+            .padding(.horizontal, 7).padding(.vertical, 3)
+            .background(.quaternary.opacity(0.6), in: RoundedRectangle(cornerRadius: 6))
+            .frame(maxWidth: 220)
 
-                Spacer()
+            Spacer()
 
-                if let modified = file.modified {
-                    Text(modified.formatted(date: .abbreviated, time: .shortened))
+            Text(countLabel)
+                .font(.caption).foregroundStyle(.secondary)
+                .monospacedDigit()
+
+            Menu {
+                Picker("Sort", selection: $model.sort) {
+                    ForEach(MediaSort.allCases) { Text($0.label).tag($0) }
+                }
+                Divider()
+                Toggle("Group by date", isOn: $model.groupsByDate)
+                Divider()
+                Picker("Preview size", selection: $model.thumbnailSize) {
+                    Text("Small").tag(28.0)
+                    Text("Medium").tag(36.0)
+                    Text("Large").tag(56.0)
+                    Text("Huge").tag(84.0)
+                }
+            } label: {
+                Label("View", systemImage: "slider.horizontal.3")
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 8)
+    }
+
+    private var countLabel: String {
+        let rows = model.rows
+        let bytes = rows.reduce(Int64(0)) { $0 + $1.size(includingRaw: model.includesRaw($1)) }
+        let noun = rows.count == 1 ? "item" : "items"
+        return "\(rows.count) \(noun) · \(bytes.byteLabel)"
+    }
+
+    private var fileList: some View {
+        List(selection: $selection) {
+            ForEach(model.sections) { section in
+                if model.groupsByDate {
+                    Section {
+                        ForEach(section.rows) { row(for: $0) }
+                    } header: {
+                        HStack {
+                            Text(section.title)
+                            Spacer()
+                            Text("\(section.rows.count) · \(model.bytes(of: section).byteLabel)")
+                                .foregroundStyle(.tertiary).monospacedDigit()
+                        }
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                    }
+                } else {
+                    ForEach(section.rows) { row(for: $0) }
                 }
-
-                Text(file.size.byteLabel)
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
-                    .frame(width: 72, alignment: .trailing)
             }
-            .padding(.vertical, 2)
-            // No tap gesture on the row, deliberately. Every spelling of
-            // double-click-to-preview cost something, and the last one was the
-            // subtlest: a gesture's hit area is the row's *content*, so clicks
-            // on the name and thumbnail went through gesture arbitration while
-            // clicks on the empty space beside them went straight to the List.
-            // Half the row selected crisply and half did not.
-            //
-            //   .onTapGesture(count: 2)       rows stop selecting at all
-            //   .contentShape + simultaneous  rows stop selecting at all
-            //   .simultaneousGesture alone    selection works, but only the
-            //                                 white space feels responsive
-            //
-            // Preview has three affordances that cost the row nothing: the
-            // thumbnail is a real Button, plus the Preview button and the
-            // context menu item. So the row itself does exactly one thing.
-            .contextMenu {
-                Button("Preview") { preview(file) }
-                    .disabled(model.importer.isRunning || model.previewSource(for: file) == nil)
-                Button("Overlays…") { editingOverlays = file }
-                    .disabled(model.importer.isRunning || model.importedURL(for: file) == nil)
-                Divider()
-                Button("Tick All for Overlays") { model.setOverlaysEnabledForAll(true) }
-                Button("Untick All") { model.setOverlaysEnabledForAll(false) }
-                Divider()
-                Button("Generate Overlays for Selection") {
-                    model.queueOverlays(for: model.visibleFiles.filter { selection.contains($0.id) })
-                }
-                .disabled(model.isRunningOverlayQueue || model.overlayExporter.isRunning
-                          || selection.isEmpty)
-            }
-            .tag(file.id)
         }
         .listStyle(.inset)
         .onChange(of: selection) { _, new in
@@ -260,51 +262,159 @@ struct ContentView: View {
         }
     }
 
-    /// Duration and resolution once the camera has told us, folder until then.
-    private func rowSubtitle(for file: MediaFile) -> String {
+    @ViewBuilder
+    private func row(for row: MediaRow) -> some View {
+        let file = row.primary
+        HStack(spacing: 10) {
+            Image(systemName: model.alreadyImported(row)
+                  ? "checkmark.circle.fill" : "circle.dashed")
+                .foregroundStyle(model.alreadyImported(row) ? .green : .secondary)
+                .help(model.alreadyImported(row) ? "Already imported" : "Not imported yet")
+
+            Button { preview(file) } label: { ClipThumbnail(file: file, height: model.thumbnailSize) }
+                .buttonStyle(.plain)
+                .disabled(model.importer.isRunning || model.previewSource(for: file) == nil)
+                .help("Play a preview straight from the camera, without copying it")
+
+            VStack(alignment: .leading, spacing: 1) {
+                HStack(spacing: 5) {
+                    Text(file.name)
+                    if row.hasRaw { rawBadge(row) }
+                    if row.isVideo { overlayBadge(file) }
+                    if row.isRawOnly {
+                        badge("RAW", filled: true)
+                            .help("A raw photo with no JPEG beside it")
+                    }
+                    if file.isSidecar {
+                        badge("proxy", filled: false)
+                    }
+                }
+                Text(rowSubtitle(for: row))
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+
+            Spacer()
+
+            if let modified = file.modified {
+                Text(modified.formatted(date: .abbreviated, time: .shortened))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Text(row.size(includingRaw: model.includesRaw(row)).byteLabel)
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+                .frame(width: 72, alignment: .trailing)
+        }
+        .padding(.vertical, 2)
+        // No gestures on the row: they take the click List(selection:) needs.
+        // See DECISIONS #25.
+        .contextMenu {
+            Button("Preview") { preview(file) }
+                .disabled(model.importer.isRunning || model.previewSource(for: file) == nil)
+            Button("Overlays…") { editingOverlays = file }
+                .disabled(model.importer.isRunning || model.importedURL(for: file) == nil)
+            if row.hasRaw {
+                Divider()
+                Button(model.includesRaw(row) ? "Skip the RAW file" : "Include the RAW file") {
+                    model.setIncludesRaw(!model.includesRaw(row), for: row)
+                }
+            }
+            Divider()
+            Button("Tick All for Overlays") { model.setOverlaysEnabledForAll(true) }
+            Button("Untick All") { model.setOverlaysEnabledForAll(false) }
+            Divider()
+            Button("Generate Overlays for Selection") {
+                model.queueOverlays(for: model.rows(withIDs: selection).map(\.primary))
+            }
+            .disabled(model.isRunningOverlayQueue || model.overlayExporter.isRunning
+                      || selection.isEmpty)
+        }
+        .tag(row.id)
+    }
+
+    /// The raw file's badge, which is also its switch.
+    private func rawBadge(_ row: MediaRow) -> some View {
+        Button {
+            model.setIncludesRaw(!model.includesRaw(row), for: row)
+        } label: {
+            badge("RAW", filled: model.includesRaw(row))
+        }
+        .buttonStyle(.plain)
+        .help(model.includesRaw(row)
+              ? "The .GPR will be imported with this photo — click to skip it"
+              : "The .GPR will be skipped — click to include it")
+    }
+
+    /// Whether this clip gets an overlay when overlays are generated.
+    private func overlayBadge(_ file: MediaFile) -> some View {
+        Button {
+            model.setOverlaysEnabled(!model.overlaysEnabled(for: file), for: file)
+        } label: {
+            Image(systemName: "speedometer")
+                .font(.caption2)
+                .foregroundStyle(model.overlaysEnabled(for: file)
+                                 ? Color.white : Color.secondary)
+                .padding(.horizontal, 4).padding(.vertical, 2)
+                .background(model.overlaysEnabled(for: file)
+                            ? AnyShapeStyle(Color.accentColor)
+                            : AnyShapeStyle(.quaternary),
+                            in: Capsule())
+        }
+        .buttonStyle(.plain)
+        .help(model.overlaysEnabled(for: file)
+              ? "This clip gets an overlay — click to skip it"
+              : "This clip is skipped when overlays are generated — click to include it")
+    }
+
+    private func badge(_ text: String, filled: Bool) -> some View {
+        Text(text)
+            .font(.caption2.weight(filled ? .semibold : .regular))
+            .foregroundStyle(filled ? Color.white : Color.secondary)
+            .padding(.horizontal, 4).padding(.vertical, 1)
+            .background(filled ? AnyShapeStyle(Color.accentColor)
+                               : AnyShapeStyle(.quaternary),
+                        in: Capsule())
+    }
+
+    private func rowSubtitle(for row: MediaRow) -> String {
         var parts: [String] = []
-        if model.devicesOnCard.count > 1 { parts.append(file.device.label) }
-        parts.append(file.folder)
-        if let summary = model.previews.details[file.id]?.summary, !summary.isEmpty {
+        if model.devicesOnCard.count > 1 { parts.append(row.primary.device.label) }
+        parts.append(row.folder)
+        if let summary = model.previews.details[row.primary.id]?.summary, !summary.isEmpty {
             parts.append(summary)
         }
+        if row.hasRaw, !model.includesRaw(row) { parts.append("RAW skipped") }
         return parts.joined(separator: " · ")
     }
 
-    /// Previewing opens a fifth stream against a camera that is already
-    /// serving four, and an import is the operation worth protecting. Playback
-    /// waits until it finishes.
     private func preview(_ file: MediaFile) {
         guard !model.importer.isRunning, model.previewSource(for: file) != nil else { return }
         previewing = file
     }
 
-    /// The clip a Preview button would act on: the selection when it is a
-    /// single clip, so the button matches what the list is showing as chosen.
     private var previewTarget: MediaFile? {
-        guard !model.importer.isRunning else { return nil }
-        guard selection.count == 1, let id = selection.first else { return nil }
-        return model.visibleFiles.first { $0.id == id && model.previewSource(for: $0) != nil }
+        guard !model.importer.isRunning, selection.count == 1, let id = selection.first
+        else { return nil }
+        return model.rows.first { $0.id == id && model.previewSource(for: $0.primary) != nil }?
+            .primary
     }
 
     /// Overlays are edited against the imported copy, so this stays nil until a
     /// clip is actually on disk.
     private var overlayTarget: MediaFile? {
-        guard !model.importer.isRunning else { return nil }
-        guard selection.count == 1, let id = selection.first else { return nil }
-        return model.visibleFiles.first { $0.id == id && model.importedURL(for: $0) != nil }
+        guard !model.importer.isRunning, selection.count == 1, let id = selection.first
+        else { return nil }
+        return model.rows.first { $0.id == id && model.importedURL(for: $0.primary) != nil }?
+            .primary
     }
 
     // MARK: - Footer
 
     private var footer: some View {
         VStack(spacing: 10) {
-            if model.importer.isRunning {
-                importProgress
-            }
-            // A burn-in outlives the editor sheet, so it reports here too --
-            // otherwise closing that sheet leaves it running with nothing to
-            // show for it, and a part-written file that looks like a failure.
+            if model.importer.isRunning { importProgress }
             if let converting = model.convertingGPR {
                 HStack(spacing: 6) {
                     ProgressView().controlSize(.small)
@@ -319,122 +429,11 @@ struct ContentView: View {
                 overlayExportFinished(exported)
             }
 
-            HStack(alignment: .top, spacing: 14) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Import to")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Button {
-                        choosingDestination = true
-                    } label: {
-                        Text(model.destination.path.replacingOccurrences(
-                            of: NSHomeDirectory(), with: "~"))
-                            .lineLimit(1)
-                            .truncationMode(.head)
-                    }
-                    .buttonStyle(.link)
-                    Text(model.examplePath + "/")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(1)
-                        .truncationMode(.head)
-                        .help("Where the next import will land")
-                }
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Toggle("Date folders", isOn: $model.organiseByDate)
-                        .toggleStyle(.checkbox)
-                        .help("Sort clips into YYYY-MM-DD folders as they are copied")
-
-                    Toggle("Show proxies", isOn: $model.includeSidecars)
-                        .toggleStyle(.checkbox)
-                        .help("Include .LRV/.LRF proxies and thumbnails in the list. "
-                              + "They are always visible on the mounted drive.")
-
-                    // Only offered when the card actually has raw stills on it.
-                    if model.hasGPRFiles {
-                        HStack(spacing: 6) {
-                            Toggle("GPR → DNG", isOn: $model.convertGPRToDNG)
-                                .toggleStyle(.checkbox)
-                                .help("GoPro's raw stills use VC-5 compression, which "
-                                      + "nothing on macOS can open. Converting writes a "
-                                      + "DNG beside each one, with all its colour data intact.")
-                            if model.convertGPRToDNG {
-                                Toggle("replace", isOn: $model.replaceGPRWithDNG)
-                                    .toggleStyle(.checkbox)
-                                    .help("Delete each .GPR once its .DNG has been written.")
-                            }
-                        }
-                    }
-
-                    HStack(spacing: 6) {
-                        Toggle("Overlays after import", isOn: $model.overlaysAfterImport)
-                            .toggleStyle(.checkbox)
-                            .help("Run the saved overlay preset over each ticked clip "
-                                  + "once it has copied across.")
-                        if model.overlaysAfterImport {
-                            Text("\(model.overlayEligibleCount) ticked · \(model.overlayPresetSummary)")
-                                .font(.caption2).foregroundStyle(.tertiary)
-                                .lineLimit(1)
-                        }
-                    }
-
-                    HStack(spacing: 6) {
-                        Toggle("Device folders", isOn: $model.separateByCamera)
-                            .toggleStyle(.checkbox)
-                            .help("Give each device its own folder, named after the model "
-                                  + "when the camera knows it")
-
-                        if model.separateByCamera && model.isConnected
-                            && model.devicesOnCard.contains(where: { $0.isAttachedCamera }) {
-                            Stepper(value: Binding(get: { model.cameraNumber },
-                                                   set: { model.setCameraNumber($0) }),
-                                    in: 1...99) {
-                                Text("#\(model.cameraNumber)")
-                                    .font(.caption.monospacedDigit())
-                            }
-                            .help("Distinguishes two bodies of the same model. "
-                                  + "Remembered per camera; #1 is left out of the folder name.")
-                        }
-                    }
-                }
-
+            HStack(alignment: .center, spacing: 14) {
+                destinationControl
                 Spacer()
-
-                if model.importer.isRunning {
-                    Button("Cancel") { model.cancelImport() }
-                } else {
-                    Button {
-                        if let target = previewTarget { preview(target) }
-                    } label: {
-                        Label("Preview", systemImage: "play.rectangle")
-                    }
-                    .disabled(previewTarget == nil)
-                    .help("Play the camera's low-resolution proxy without copying anything. "
-                          + "Double-clicking a clip does the same.")
-
-                    Button {
-                        if let target = overlayTarget { editingOverlays = target }
-                    } label: {
-                        Label("Overlays", systemImage: "speedometer")
-                    }
-                    .disabled(overlayTarget == nil)
-                    .help(overlayTarget == nil
-                          ? "Import a clip first — overlays are edited against the copy on disk."
-                          : "Position the speed gauge and route map on this clip.")
-
-                    Button("Import Selected") { model.importSelected() }
-                    .disabled(selection.isEmpty)
-
-                    Button {
-                        model.importNew()
-                    } label: {
-                        Label("Import \(model.newFiles.count) New",
-                              systemImage: "square.and.arrow.down")
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(model.newFiles.isEmpty)
-                }
+                optionsButton
+                actions
             }
         }
         .padding(.horizontal, 18)
@@ -442,6 +441,105 @@ struct ContentView: View {
         .fileImporter(isPresented: $choosingDestination,
                       allowedContentTypes: [.folder]) { result in
             if case .success(let url) = result { model.destination = url }
+        }
+    }
+
+    /// The destination, with the folder itself one click away — it used to be a
+    /// path you could read and not open.
+    private var destinationControl: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 6) {
+                Text("Import to").font(.caption).foregroundStyle(.secondary)
+                Button("Change…") { choosingDestination = true }
+                    .buttonStyle(.link).font(.caption)
+            }
+            Button {
+                model.revealImportDestination()
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "folder")
+                    Text(model.examplePath + "/")
+                        .lineLimit(1).truncationMode(.head)
+                }
+            }
+            .buttonStyle(.link)
+            .help("Open this folder in Finder")
+        }
+    }
+
+    /// Everything that used to be five rows of checkboxes.
+    private var optionsButton: some View {
+        Menu {
+            Toggle("Date folders", isOn: $model.organiseByDate)
+            Toggle("Device folders", isOn: $model.separateByCamera)
+            if model.separateByCamera, model.isConnected,
+               model.devicesOnCard.contains(where: { $0.isAttachedCamera }) {
+                Stepper(value: Binding(get: { model.cameraNumber },
+                                       set: { model.setCameraNumber($0) }), in: 1...99) {
+                    Text("Camera #\(model.cameraNumber)")
+                }
+            }
+            Divider()
+            Toggle("Show proxies", isOn: $model.includeSidecars)
+            if model.hasGPRFiles {
+                Divider()
+                Toggle("Convert GPR to DNG", isOn: $model.convertGPRToDNG)
+                if model.convertGPRToDNG {
+                    Toggle("Delete the GPR afterwards", isOn: $model.replaceGPRWithDNG)
+                }
+            }
+            Divider()
+            Toggle("Overlays after import", isOn: $model.overlaysAfterImport)
+            if model.overlaysAfterImport {
+                Text("\(model.overlayEligibleCount) ticked · \(model.overlayPresetSummary)")
+            }
+        } label: {
+            Label("Options", systemImage: "gearshape")
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+    }
+
+    private var actions: some View {
+        HStack(spacing: 8) {
+            if model.importer.isRunning {
+                Button("Cancel") { model.cancelImport() }
+            } else {
+                if !selection.isEmpty {
+                    let summary = model.selectionSummary(selection)
+                    Text("\(summary.count) selected · \(summary.bytes.byteLabel)")
+                        .font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                }
+
+                Button {
+                    if let target = previewTarget { preview(target) }
+                } label: {
+                    Label("Preview", systemImage: "play.rectangle")
+                }
+                .disabled(previewTarget == nil)
+                .help("Play the camera's low-resolution proxy without copying anything")
+
+                Button {
+                    if let target = overlayTarget { editingOverlays = target }
+                } label: {
+                    Label("Overlays", systemImage: "speedometer")
+                }
+                .disabled(overlayTarget == nil)
+                .help(overlayTarget == nil
+                      ? "Import a clip first — overlays are edited against the copy on disk."
+                      : "Position the speed gauge and route map on this clip.")
+
+                Button("Import Selected") { model.importSelected() }
+                    .disabled(selection.isEmpty)
+
+                Button {
+                    model.importNew()
+                } label: {
+                    Label("Import \(model.newRows.count) New", systemImage: "square.and.arrow.down")
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(model.newRows.isEmpty)
+            }
         }
     }
 

@@ -30,9 +30,10 @@ final class OverlayEditorModel: ObservableObject {
     }
     @Published private(set) var duration: Double = 0
     @Published private(set) var track = TelemetryTrack()
+    @Published private(set) var gforce = GForceTrack()
 
     /// Which overlay a drag is moving.
-    enum Handle { case gauge, map }
+    enum Handle { case gauge, map, gforce }
     @Published var dragging: Handle?
 
     /// Export itself lives on AppModel so it outlives this sheet.
@@ -47,7 +48,9 @@ final class OverlayEditorModel: ObservableObject {
 
     private let url: URL
     private var raw = TelemetryTrack()
+    private var rawGForce = GForceTrack()
     private var maxSpeed: Double = 60
+    private var maxG: Double = 1
     private var frame: CGImage?
     private var generator: AVAssetImageGenerator?
     private var frameTask: Task<Void, Never>?
@@ -73,6 +76,9 @@ final class OverlayEditorModel: ObservableObject {
             status = "This clip has no usable GPS fixes, so there is nothing to overlay."
             return
         }
+        // The accelerometer is optional: a clip can have GPS and no usable
+        // accelerometer, and that should cost the meter, not the whole editor.
+        rawGForce = (try? GForceReader.read(url)) ?? GForceTrack()
         applySmoothing()
 
         let asset = AVURLAsset(url: url)
@@ -100,6 +106,17 @@ final class OverlayEditorModel: ObservableObject {
     private func applySmoothing() {
         track = raw.smoothed(settings.gauge.smoothing)
         maxSpeed = OverlayComposer.maxSpeed(for: raw, unit: settings.gauge.unit)
+        gforce = rawGForce.smoothed(settings.gforce.smoothing)
+        // Scaled from the smoothed track, which is what gets drawn: the raw
+        // peak on this ride is 2.82 g against 1.01 g smoothed, and scaling to
+        // the former leaves the ball parked in the middle all day.
+        maxG = OverlayComposer.maxG(for: gforce, config: settings.gforce)
+    }
+
+    var hasGForce: Bool { !rawGForce.isEmpty }
+    var gForceSummary: String {
+        guard hasGForce else { return "No accelerometer data in this clip." }
+        return String(format: "peak %.2f g · full scale %.1f g", gforce.peakPlanar, maxG)
     }
 
     /// Re-smoothing is only needed when the window or the unit changes; doing it
@@ -132,7 +149,8 @@ final class OverlayEditorModel: ObservableObject {
         let size = CGSize(width: width, height: height)
         context.draw(frame, in: CGRect(origin: .zero, size: size))
         OverlayComposer.draw(in: context, frameSize: size, track: track, at: time,
-                             settings: settings, maxSpeed: maxSpeed)
+                             settings: settings, maxSpeed: maxSpeed,
+                             gforce: gforce, maxG: maxG)
         preview = context.makeImage()
     }
 
@@ -142,7 +160,10 @@ final class OverlayEditorModel: ObservableObject {
         let gaugeRect = GaugeRenderer.frame(in: unitSize, config: settings.gauge)
         let mapRect = MapRenderer.frame(in: unitSize, config: settings.map)
         let flipped = CGPoint(x: point.x, y: 1 - point.y)
-        if settings.showsGauge, gaugeRect.insetBy(dx: -0.02, dy: -0.02).contains(flipped) {
+        let gRect = GForceRenderer.frame(in: unitSize, config: settings.gforce)
+        if settings.showsGForce, gRect.insetBy(dx: -0.02, dy: -0.02).contains(flipped) {
+            dragging = .gforce
+        } else if settings.showsGauge, gaugeRect.insetBy(dx: -0.02, dy: -0.02).contains(flipped) {
             dragging = .gauge
         } else if settings.showsMap, mapRect.insetBy(dx: -0.02, dy: -0.02).contains(flipped) {
             dragging = .map
@@ -168,6 +189,13 @@ final class OverlayEditorModel: ObservableObject {
             settings.map.placement.x = point.x
             settings.map.placement.y = point.y
             settings.map.placement = settings.map.placement.clamped(in: clampSize)
+        case .gforce:
+            settings.gforce.placement.x = point.x
+            settings.gforce.placement.y = point.y
+            settings.gforce.placement = settings.gforce.placement
+                .clamped(in: clampSize,
+                         heightRatio: settings.gforce.showsReading
+                             ? 1 + GForceRenderer.readoutStrip : 1)
         }
     }
 
@@ -214,7 +242,8 @@ final class OverlayEditorModel: ObservableObject {
         confirmingReplace = false
         guard !app.isExportingOverlay, track.hasFix else { return }
         app.startOverlayExport(clip: url, to: exportDestination, track: track,
-                               settings: settings, options: exportOptions)
+                               settings: settings, options: exportOptions,
+                               gforce: gforce)
     }
 
     func cancelExport() { app.cancelOverlayExport() }

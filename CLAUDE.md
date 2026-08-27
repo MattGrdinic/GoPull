@@ -196,6 +196,17 @@ suspends and `ContentView` disables preview while `importer.isRunning`.
 **Camera present with no card looks like no camera.** `/gopro/media/list` fails either way.
 `refresh()` disambiguates with `keepAlive()`; don't collapse those branches.
 
+**ACCL includes gravity, and its axes are not what ORIN says.** A still camera reads 1 g, so
+gravity is estimated by low-passing the signal and subtracted — which also makes it independent of
+how the camera is mounted. The stream's `ORIN` is `ZXY` while the gravity stream carries none, and
+their dominant axes disagree, so neither is trusted. The mapping was established from a real ride
+instead: axis 0 is vertical (9.76 m/s² average), axis 1 is lateral (r = −0.542 against
+v·dHeading/dt) and axis 2 is longitudinal (r = −0.431 against GPS d(speed)/dt), all sign-flipped.
+Re-derive it the same way before assuming it holds for a different mount.
+
+**Scale the g-meter from the smoothed track, not the raw one.** A single bump put the raw peak at
+2.82 g against 1.01 g smoothed, and full scale at 4 g left the ball in the middle for a whole ride.
+
 **GPR is a DNG that macOS cannot decode.** ImageIO reports a `.GPR` as
 `com.adobe.raw-image`, reads every DNG tag out of it, and then fails to produce a single pixel or
 a thumbnail — the tile is VC-5 compressed. `GPRConverter` decodes it with GoPro's decoder,

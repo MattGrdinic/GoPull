@@ -20,6 +20,9 @@ GoPro Connect models.
   and frame rate, read from the camera. Double-click one to play it: the camera has a
   low-resolution `.LRV` proxy beside every clip, so an 11.5 GB 8K recording previews from a
   364 MB file that streams off the card without copying anything.
+* **G-force meter** — an optional third overlay: a ball on a target showing cornering and
+  braking, with a short trail behind it. Read from the camera's 200 Hz accelerometer, with
+  gravity removed.
 * **GPR → DNG** — GoPro's raw stills are DNGs whose image tile is VC-5 compressed, which
   nothing on macOS can decode: ImageIO reads the metadata and then produces no pixels. GoPull
   decodes the tile and writes a real DNG beside it, keeping every colour tag, in about half a

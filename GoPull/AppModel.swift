@@ -500,9 +500,12 @@ final class AppModel: ObservableObject {
                 return
             }
             let track = raw.smoothed(settings.gauge.smoothing)
+            let gforce = ((try? GForceReader.read(clip)) ?? GForceTrack())
+                .smoothed(settings.gforce.smoothing)
             let destination = Self.overlayDestination(for: clip, settings: settings)
             self.startOverlayExport(clip: clip, to: destination, track: track,
-                                    settings: settings, options: settings.export)
+                                    settings: settings, options: settings.export,
+                                    gforce: gforce)
             await self.overlayExportTask?.value
             if !self.overlayQueue.isEmpty { self.overlayQueue.removeFirst() }
             self.overlayQueueDone += 1
@@ -523,7 +526,8 @@ final class AppModel: ObservableObject {
     }
 
     func startOverlayExport(clip: URL, to destination: URL, track: TelemetryTrack,
-                            settings: OverlaySettings, options: ExportOptions) {
+                            settings: OverlaySettings, options: ExportOptions,
+                            gforce: GForceTrack = GForceTrack()) {
         guard overlayExportTask == nil else { return }
         overlayExportError = nil
         overlayExportResult = nil
@@ -532,7 +536,7 @@ final class AppModel: ObservableObject {
             do {
                 try await self.overlayExporter.export(clip: clip, to: destination,
                                                       track: track, settings: settings,
-                                                      options: options)
+                                                      options: options, gforce: gforce)
                 self.overlayExportResult = destination
             } catch is CancellationError {
                 // Cancelling is not a failure worth an alert.

@@ -172,6 +172,24 @@ struct OverlayEditorView: View {
                     slider("Rim", value: $model.settings.map.style.rim.a, in: 0...1)
                 }
 
+                section("G-force") {
+                    Toggle("Show g-force meter", isOn: $model.settings.showsGForce)
+                        .disabled(!model.hasGForce)
+                    Text(model.gForceSummary)
+                        .font(.caption2).foregroundStyle(.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if model.settings.showsGForce, model.hasGForce {
+                        slider("Size", value: $model.settings.gforce.placement.scale,
+                               in: 0.08...0.35)
+                        slider("Trail", value: $model.settings.gforce.trailSeconds,
+                               in: 0...4, format: "%.1f s")
+                        Toggle("Show reading", isOn: $model.settings.gforce.showsReading)
+                    }
+                }
+                .onChange(of: model.settings.gforce.smoothingSeconds) { _, _ in
+                    model.settingsChangedRequiringResample()
+                }
+
                 section("Smoothing") {
                     slider("Window", value: Binding(
                         get: { model.settings.gauge.smoothingSeconds },

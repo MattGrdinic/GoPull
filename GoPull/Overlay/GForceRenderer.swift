@@ -123,10 +123,12 @@ enum GForceRenderer {
     static let readoutStrip = 0.20
 
     static func frame(in size: CGSize, config: GForceConfig) -> CGRect {
-        var ratio = 1.0
-        if config.showsReading { ratio += readoutStrip }
-        if config.showsReading && config.showsPeaks { ratio += 0.14 }
-        return config.placement.rect(in: size, heightRatio: ratio)
+        let ratio = config.showsReading ? 1 + readoutStrip : 1
+        // Clamped, so switching something on cannot push the meter off the
+        // frame: the box grows downward and the reading was ending up hard
+        // against the bottom edge.
+        return config.placement.clamped(in: size, heightRatio: ratio)
+            .rect(in: size, heightRatio: ratio)
     }
 
     /// `trail` is the recent history, oldest first, in the same units.
@@ -216,12 +218,12 @@ enum GForceRenderer {
                 (extremes.accelerating, CGVector(dx: 0, dy: 1)),
                 (extremes.braking, CGVector(dx: 0, dy: -1)),
             ]
+            let tick = radius * 0.10
             context.setStrokeColor(style.ball.opacity(0.55).cgColor)
             context.setLineWidth(max(radius * 0.045, 1))
             context.setLineCap(.round)
             for (value, direction) in marks where value > 0 {
                 let distance = Swift.min(value / maxG, 1.0) * reach
-                let tick = radius * 0.10
                 let x = centre.x + direction.dx * distance
                 let y = centre.y + direction.dy * distance
                 // A tick across the axis, not along it, so it reads as a limit.
@@ -229,6 +231,22 @@ enum GForceRenderer {
                 context.addLine(to: CGPoint(x: x + direction.dy * tick, y: y + direction.dx * tick))
             }
             context.strokePath()
+
+            // The number belongs on the axis it describes, not in a row of
+            // four under the dial where it has to be decoded.
+            //
+            // At a *fixed* place on each axis, not beside its own tick. Tying
+            // the label to the tick put all four in a heap in the middle
+            // whenever the peaks were small, which on a road ride they always
+            // are — 0.2 g of lateral is 13% of full scale.
+            let labelAt = radius * 0.60
+            for (value, direction) in marks where value > 0 {
+                text(String(format: "%.2f", value),
+                     centredAt: CGPoint(x: centre.x + direction.dx * labelAt,
+                                        y: centre.y + direction.dy * labelAt),
+                     size: radius * 0.13, font: style.captionFont,
+                     color: style.ball.opacity(0.85), in: context)
+            }
         }
 
         if trail.count > 1, style.trail.a > 0 {
@@ -255,23 +273,9 @@ enum GForceRenderer {
         if config.showsReading {
             // Inside the disc, not on its edge: at radius * 0.20 the number sat
             // on the rim and the unit fell outside the circle entirely.
-            // Laid out from the bottom of the box upward, because the box
-            // grows when the peaks line is on and everything below the dial
-            // has to move with it.
-            let showsPeaks = config.showsPeaks && !extremes.isEmpty
-            let peaksBand = showsPeaks ? rect.width * 0.14 : 0
-            if showsPeaks {
-                let peaks = String(format: "L%.2f  R%.2f  A%.2f  B%.2f",
-                                   extremes.left, extremes.right,
-                                   extremes.accelerating, extremes.braking)
-                text(peaks, centredAt: CGPoint(x: rect.midX, y: rect.minY + peaksBand * 0.5),
-                     size: radius * 0.155, font: style.captionFont,
-                     color: style.caption, in: context)
-            }
             let value = reading.map { String(format: "%.2f g", $0.planar) } ?? "-- g"
             text(value, centredAt: CGPoint(x: rect.midX,
-                                           y: rect.minY + peaksBand
-                                              + rect.width * readoutStrip * 0.5),
+                                           y: rect.minY + rect.width * readoutStrip * 0.5),
                  size: radius * 0.30, font: style.numberFont, color: style.text, in: context)
         }
     }

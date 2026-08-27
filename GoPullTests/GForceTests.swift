@@ -200,3 +200,41 @@ struct GForceTests {
         #expect(abs(without.height - without.width) < 0.001)
     }
 }
+
+struct OverlayFitsTests {
+
+    private let hd = CGSize(width: 1920, height: 1080)
+
+    /// Switching a thing on grows the box downward, and it was ending up hard
+    /// against the bottom edge of the frame.
+    @Test func theMeterStaysOnFrameWhenItGrows() {
+        var config = GForceConfig()
+        config.placement = OverlayPlacement(x: 0.9, y: 0.97, scale: 0.2)
+        for reading in [true, false] {
+            config.showsReading = reading
+            let rect = GForceRenderer.frame(in: hd, config: config)
+            #expect(rect.minY >= -0.5, "reading \(reading)")
+            #expect(rect.maxY <= hd.height + 0.5, "reading \(reading)")
+            #expect(rect.minX >= -0.5 && rect.maxX <= hd.width + 0.5)
+        }
+    }
+
+    /// The launch badge grows a row per target, and three of them hung off.
+    @Test func theLaunchBadgeStaysOnFrameWithManyTargets() {
+        var config = AccelerationConfig()
+        config.placement = OverlayPlacement(x: 0.5, y: 0.95, scale: 0.3)
+        for targets in [[30], [30, 60], [30, 60, 100]] {
+            config.detection.targets = targets
+            let rect = AccelerationRenderer.frame(in: hd, config: config)
+            #expect(rect.minY >= -0.5, "targets \(targets)")
+            #expect(rect.maxY <= hd.height + 0.5, "targets \(targets)")
+        }
+    }
+
+    @Test func aMeterInTheMiddleIsNotMoved() {
+        var config = GForceConfig()
+        config.placement = OverlayPlacement(x: 0.5, y: 0.5, scale: 0.15)
+        let rect = GForceRenderer.frame(in: hd, config: config)
+        #expect(abs(rect.midX - hd.width / 2) < 0.5)
+    }
+}

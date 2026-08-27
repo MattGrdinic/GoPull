@@ -185,7 +185,7 @@ struct OverlayEditorView: View {
                                in: 0...4, format: "%.1f s")
                         Toggle("Show reading", isOn: $model.settings.gforce.showsReading)
                         Toggle("Mark the clip's peaks", isOn: $model.settings.gforce.showsPeaks)
-                        if model.settings.gforce.showsPeaks {
+                        if model.settings.gforce.showsPeaks, !model.gForcePeaks.isEmpty {
                             Text(model.gForcePeaks)
                                 .font(.caption2).foregroundStyle(.tertiary)
                                 .fixedSize(horizontal: false, vertical: true)

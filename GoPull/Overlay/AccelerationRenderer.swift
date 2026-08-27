@@ -95,7 +95,10 @@ enum AccelerationRenderer {
     static func frame(in size: CGSize, config: AccelerationConfig) -> CGRect {
         let rows = max(config.detection.targets.count, 1)
         let ratio = (0.34 + Double(rows) * 0.30)
-        return config.placement.rect(in: size, heightRatio: ratio)
+        // Clamped: this box grows with the number of targets, and three of them
+        // would otherwise hang off the frame.
+        return config.placement.clamped(in: size, heightRatio: ratio)
+            .rect(in: size, heightRatio: ratio)
     }
 
     /// `run` is the one in progress or just finished; `best` an earlier one to

@@ -115,7 +115,7 @@ struct ContentView: View {
                 .foregroundStyle(.tertiary)
             Text("Looking for a GoPro…")
                 .font(.title3)
-            Text("The camera must be powered on and set to GoPro Connect mode rather than MTP.")
+            Text("The camera must be powered on and set to GoPro Connect mode rather than MTP. If it is, try unplugging and replugging the USB cable.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)

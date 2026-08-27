@@ -83,6 +83,8 @@ struct GForceConfig: Equatable, Codable {
     var maxG: Double?
     /// Seconds of trail behind the ball. Zero draws none.
     var trailSeconds: Double = 1.2
+    /// Mark how far the clip went each way, and print the numbers.
+    var showsPeaks: Bool = false
     var smoothingSeconds: Double = 0.3
     var showsReading: Bool = true
 
@@ -121,14 +123,17 @@ enum GForceRenderer {
     static let readoutStrip = 0.20
 
     static func frame(in size: CGSize, config: GForceConfig) -> CGRect {
-        config.placement.rect(in: size,
-                              heightRatio: config.showsReading ? 1 + readoutStrip : 1)
+        var ratio = 1.0
+        if config.showsReading { ratio += readoutStrip }
+        if config.showsReading && config.showsPeaks { ratio += 0.14 }
+        return config.placement.rect(in: size, heightRatio: ratio)
     }
 
     /// `trail` is the recent history, oldest first, in the same units.
     static func draw(_ reading: GForceSample?, trail: [GForceSample],
                      in context: CGContext, frameSize: CGSize,
-                     config: GForceConfig, maxG: Double) {
+                     config: GForceConfig, maxG: Double,
+                     extremes: GForceTrack.Extremes = .init()) {
         let rect = frame(in: frameSize, config: config)
         // The circle occupies the top square of the box; anything below it is
         // the readout strip.
@@ -201,6 +206,31 @@ enum GForceRenderer {
             context.strokePath()
         }
 
+        // The clip's high-water marks, before the trail and the ball so they
+        // sit behind what is happening now.
+        if config.showsPeaks, !extremes.isEmpty {
+            let reach = radius * 0.86
+            let marks: [(Double, CGVector)] = [
+                (extremes.right, CGVector(dx: 1, dy: 0)),
+                (extremes.left, CGVector(dx: -1, dy: 0)),
+                (extremes.accelerating, CGVector(dx: 0, dy: 1)),
+                (extremes.braking, CGVector(dx: 0, dy: -1)),
+            ]
+            context.setStrokeColor(style.ball.opacity(0.55).cgColor)
+            context.setLineWidth(max(radius * 0.045, 1))
+            context.setLineCap(.round)
+            for (value, direction) in marks where value > 0 {
+                let distance = Swift.min(value / maxG, 1.0) * reach
+                let tick = radius * 0.10
+                let x = centre.x + direction.dx * distance
+                let y = centre.y + direction.dy * distance
+                // A tick across the axis, not along it, so it reads as a limit.
+                context.move(to: CGPoint(x: x - direction.dy * tick, y: y - direction.dx * tick))
+                context.addLine(to: CGPoint(x: x + direction.dy * tick, y: y + direction.dx * tick))
+            }
+            context.strokePath()
+        }
+
         if trail.count > 1, style.trail.a > 0 {
             context.setStrokeColor(style.trail.cgColor)
             context.setLineWidth(max(radius * 0.035, 1))
@@ -225,9 +255,23 @@ enum GForceRenderer {
         if config.showsReading {
             // Inside the disc, not on its edge: at radius * 0.20 the number sat
             // on the rim and the unit fell outside the circle entirely.
+            // Laid out from the bottom of the box upward, because the box
+            // grows when the peaks line is on and everything below the dial
+            // has to move with it.
+            let showsPeaks = config.showsPeaks && !extremes.isEmpty
+            let peaksBand = showsPeaks ? rect.width * 0.14 : 0
+            if showsPeaks {
+                let peaks = String(format: "L%.2f  R%.2f  A%.2f  B%.2f",
+                                   extremes.left, extremes.right,
+                                   extremes.accelerating, extremes.braking)
+                text(peaks, centredAt: CGPoint(x: rect.midX, y: rect.minY + peaksBand * 0.5),
+                     size: radius * 0.155, font: style.captionFont,
+                     color: style.caption, in: context)
+            }
             let value = reading.map { String(format: "%.2f g", $0.planar) } ?? "-- g"
             text(value, centredAt: CGPoint(x: rect.midX,
-                                           y: rect.minY + rect.width * readoutStrip * 0.5),
+                                           y: rect.minY + peaksBand
+                                              + rect.width * readoutStrip * 0.5),
                  size: radius * 0.30, font: style.numberFont, color: style.text, in: context)
         }
     }

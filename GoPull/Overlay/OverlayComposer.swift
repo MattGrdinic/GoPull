@@ -23,7 +23,9 @@ enum OverlayComposer {
                      track: TelemetryTrack, at time: Double,
                      settings: OverlaySettings, maxSpeed: Double,
                      projection: RouteProjection? = nil,
-                     gforce: GForceTrack? = nil, maxG: Double = 1) {
+                     gforce: GForceTrack? = nil, maxG: Double = 1,
+                     extremes: GForceTrack.Extremes = .init(),
+                     runs: [AccelerationRun] = []) {
 
         let sample = track.sample(at: time)
 
@@ -41,7 +43,17 @@ enum OverlayComposer {
                                 trail: trail(in: gforce, at: time,
                                              seconds: settings.gforce.trailSeconds),
                                 in: context, frameSize: frameSize,
-                                config: settings.gforce, maxG: maxG)
+                                config: settings.gforce, maxG: maxG, extremes: extremes)
+        }
+
+        if settings.showsAcceleration, !runs.isEmpty {
+            let current = runs.run(at: time)
+            let best = current.flatMap { run -> AccelerationRun? in
+                guard let first = run.reached.first else { return nil }
+                return runs.filter { $0.start < run.start }.best(to: first)
+            }
+            AccelerationRenderer.draw(current, best: best, at: time, in: context,
+                                      frameSize: frameSize, config: settings.acceleration)
         }
 
         if settings.showsMap {

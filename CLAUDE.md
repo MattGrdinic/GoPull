@@ -196,6 +196,16 @@ suspends and `ContentView` disables preview while `importer.isRunning`.
 **Camera present with no card looks like no camera.** `/gopro/media/list` fails either way.
 `refresh()` disambiguates with `keepAlive()`; don't collapse those branches.
 
+**A standing start is not just "speed left zero".** Speed hovers around zero and one noisy sample
+above the threshold made an entire clip read as a single 45-second run. Departure has to *hold*,
+and a run that averages under ~1.5 mph/s to its first target is someone pulling away gently, not a
+launch. Both thresholds are in `AccelerationSettings`.
+
+**Time launches from the accelerometer, not the GPS.** GPS speed leaves zero slowly and noisily at
+10 Hz; the 200 Hz accelerometer sees the push immediately. On a real launch that moved the start
+0.22s earlier — 5% of a 4.35s time. Crossings are still GPS, interpolated between the bracketing
+pair, which halves the 100 ms quantisation.
+
 **ACCL includes gravity, and its axes are not what ORIN says.** A still camera reads 1 g, so
 gravity is estimated by low-passing the signal and subtracted — which also makes it independent of
 how the camera is mounted. The stream's `ORIN` is `ZXY` while the gravity stream carries none, and

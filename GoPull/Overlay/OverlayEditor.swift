@@ -31,6 +31,7 @@ final class OverlayEditorModel: ObservableObject {
     @Published private(set) var duration: Double = 0
     @Published private(set) var track = TelemetryTrack()
     @Published private(set) var gforce = GForceTrack()
+    @Published private(set) var runs: [AccelerationRun] = []
 
     /// Which overlay a drag is moving.
     enum Handle { case gauge, map, gforce }
@@ -51,6 +52,7 @@ final class OverlayEditorModel: ObservableObject {
     private var rawGForce = GForceTrack()
     private var maxSpeed: Double = 60
     private var maxG: Double = 1
+    private var extremes = GForceTrack.Extremes()
     private var frame: CGImage?
     private var generator: AVAssetImageGenerator?
     private var frameTask: Task<Void, Never>?
@@ -107,6 +109,9 @@ final class OverlayEditorModel: ObservableObject {
         track = raw.smoothed(settings.gauge.smoothing)
         maxSpeed = OverlayComposer.maxSpeed(for: raw, unit: settings.gauge.unit)
         gforce = rawGForce.smoothed(settings.gforce.smoothing)
+        extremes = gforce.extremes
+        runs = AccelerationDetector.runs(in: track, gforce: gforce,
+                                         settings: settings.acceleration.detection)
         // Scaled from the smoothed track, which is what gets drawn: the raw
         // peak on this ride is 2.82 g against 1.01 g smoothed, and scaling to
         // the former leaves the ball parked in the middle all day.
@@ -114,6 +119,29 @@ final class OverlayEditorModel: ObservableObject {
     }
 
     var hasGForce: Bool { !rawGForce.isEmpty }
+
+    /// What the clip pulled each way, for the editor to show.
+    var gForcePeaks: String {
+        let e = extremes
+        guard !e.isEmpty else { return "" }
+        return String(format: "left %.2f · right %.2f · accel %.2f · brake %.2f g",
+                      e.left, e.right, e.accelerating, e.braking)
+    }
+
+    /// One line per standing start, for comparing runs.
+    var runSummaries: [String] {
+        runs.map { run in
+            let splits = run.reached.map { String(format: "0–%d %.2fs", $0, run.splits[$0]!) }
+            return String(format: "%d:%02d  %@", Int(run.start) / 60, Int(run.start) % 60,
+                          splits.joined(separator: "   "))
+        }
+    }
+
+    /// Jump the preview to a run, so a time can be checked against the footage.
+    func scrub(toRun index: Int) {
+        guard runs.indices.contains(index) else { return }
+        time = Swift.max(runs[index].start - 1, 0)
+    }
     var gForceSummary: String {
         guard hasGForce else { return "No accelerometer data in this clip." }
         return String(format: "peak %.2f g · full scale %.1f g", gforce.peakPlanar, maxG)
@@ -150,7 +178,8 @@ final class OverlayEditorModel: ObservableObject {
         context.draw(frame, in: CGRect(origin: .zero, size: size))
         OverlayComposer.draw(in: context, frameSize: size, track: track, at: time,
                              settings: settings, maxSpeed: maxSpeed,
-                             gforce: gforce, maxG: maxG)
+                             gforce: gforce, maxG: maxG,
+                             extremes: extremes, runs: runs)
         preview = context.makeImage()
     }
 
@@ -243,7 +272,7 @@ final class OverlayEditorModel: ObservableObject {
         guard !app.isExportingOverlay, track.hasFix else { return }
         app.startOverlayExport(clip: url, to: exportDestination, track: track,
                                settings: settings, options: exportOptions,
-                               gforce: gforce)
+                               gforce: gforce, runs: runs)
     }
 
     func cancelExport() { app.cancelOverlayExport() }

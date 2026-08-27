@@ -18,6 +18,8 @@ struct OverlaySettings: Equatable, Codable {
     var map = MapConfig()
     var showsGForce = false
     var gforce = GForceConfig()
+    var showsAcceleration = false
+    var acceleration = AccelerationConfig()
     /// How the overlays get written out, kept with the look rather than beside
     /// it: "my preset" means burned-in-at-4K just as much as it means Hi-Tech.
     /// It is what a batch run over a card uses.
@@ -30,12 +32,14 @@ struct OverlaySettings: Equatable, Codable {
         gauge.apply(preset)
         map.apply(preset)
         gforce.apply(preset)
+        acceleration.apply(preset)
     }
 
     /// True when both overlays already agree on a preset, so the picker can
     /// show it as selected rather than guessing.
     var commonPreset: GaugePreset? {
-        gauge.preset == map.preset && map.preset == gforce.preset ? gauge.preset : nil
+        gauge.preset == map.preset && map.preset == gforce.preset
+            && gforce.preset == acceleration.preset ? gauge.preset : nil
     }
 
     static let defaults: OverlaySettings = {
@@ -63,6 +67,7 @@ struct OverlaySettings: Equatable, Codable {
         if showsGauge { parts.append(gauge.kind.label.lowercased()) }
         if showsMap { parts.append("map") }
         if showsGForce { parts.append("g-force") }
+        if showsAcceleration { parts.append("0-60") }
         parts.append(export.content == .overlayOnly ? "alpha" : "burned in")
         if export.size != .source { parts.append(export.size.label) }
         return parts.joined(separator: " · ")

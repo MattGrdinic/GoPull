@@ -503,9 +503,11 @@ final class AppModel: ObservableObject {
             let gforce = ((try? GForceReader.read(clip)) ?? GForceTrack())
                 .smoothed(settings.gforce.smoothing)
             let destination = Self.overlayDestination(for: clip, settings: settings)
+            let runs = AccelerationDetector.runs(in: track, gforce: gforce,
+                                                 settings: settings.acceleration.detection)
             self.startOverlayExport(clip: clip, to: destination, track: track,
                                     settings: settings, options: settings.export,
-                                    gforce: gforce)
+                                    gforce: gforce, runs: runs)
             await self.overlayExportTask?.value
             if !self.overlayQueue.isEmpty { self.overlayQueue.removeFirst() }
             self.overlayQueueDone += 1
@@ -527,7 +529,8 @@ final class AppModel: ObservableObject {
 
     func startOverlayExport(clip: URL, to destination: URL, track: TelemetryTrack,
                             settings: OverlaySettings, options: ExportOptions,
-                            gforce: GForceTrack = GForceTrack()) {
+                            gforce: GForceTrack = GForceTrack(),
+                            runs: [AccelerationRun] = []) {
         guard overlayExportTask == nil else { return }
         overlayExportError = nil
         overlayExportResult = nil
@@ -536,7 +539,8 @@ final class AppModel: ObservableObject {
             do {
                 try await self.overlayExporter.export(clip: clip, to: destination,
                                                       track: track, settings: settings,
-                                                      options: options, gforce: gforce)
+                                                      options: options, gforce: gforce,
+                                                      runs: runs)
                 self.overlayExportResult = destination
             } catch is CancellationError {
                 // Cancelling is not a failure worth an alert.

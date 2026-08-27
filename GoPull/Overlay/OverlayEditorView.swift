@@ -184,10 +184,39 @@ struct OverlayEditorView: View {
                         slider("Trail", value: $model.settings.gforce.trailSeconds,
                                in: 0...4, format: "%.1f s")
                         Toggle("Show reading", isOn: $model.settings.gforce.showsReading)
+                        Toggle("Mark the clip's peaks", isOn: $model.settings.gforce.showsPeaks)
+                        if model.settings.gforce.showsPeaks {
+                            Text(model.gForcePeaks)
+                                .font(.caption2).foregroundStyle(.tertiary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                     }
                 }
                 .onChange(of: model.settings.gforce.smoothingSeconds) { _, _ in
                     model.settingsChangedRequiringResample()
+                }
+
+                section("Standing starts") {
+                    Toggle("Show launch times", isOn: $model.settings.showsAcceleration)
+                        .disabled(model.runs.isEmpty)
+                    if model.runs.isEmpty {
+                        Text("No standing start in this clip — it needs to begin "
+                             + "from a stop with a GPS fix.")
+                            .font(.caption2).foregroundStyle(.tertiary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } else {
+                        ForEach(Array(model.runSummaries.enumerated()), id: \.offset) { index, line in
+                            Button(line) { model.scrub(toRun: index) }
+                                .buttonStyle(.link)
+                                .font(.caption2.monospacedDigit())
+                        }
+                        if model.settings.showsAcceleration {
+                            slider("Size", value: $model.settings.acceleration.placement.scale,
+                                   in: 0.12...0.40)
+                            Toggle("Compare with the best run",
+                                   isOn: $model.settings.acceleration.comparesToBest)
+                        }
+                    }
                 }
 
                 section("Smoothing") {

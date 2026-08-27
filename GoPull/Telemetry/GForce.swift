@@ -52,6 +52,35 @@ struct GForceTrack {
     /// The hardest cornering or braking in the clip, for scaling the meter.
     var peakPlanar: Double { samples.map(\.planar).max() ?? 0 }
 
+    /// The furthest the clip went each way, as positive magnitudes.
+    ///
+    /// Kept per direction rather than per axis: "0.51 right, 0.42 left" says
+    /// something about a ride that "0.51 lateral" does not, and braking and
+    /// acceleration are not the same achievement either.
+    struct Extremes: Equatable {
+        var left = 0.0, right = 0.0, accelerating = 0.0, braking = 0.0
+        var vertical = 0.0
+
+        var isEmpty: Bool {
+            left == 0 && right == 0 && accelerating == 0 && braking == 0
+        }
+    }
+
+    var extremes: Extremes {
+        var result = Extremes()
+        for sample in samples {
+            if sample.lateral > 0 { result.right = Swift.max(result.right, sample.lateral) }
+            else { result.left = Swift.max(result.left, -sample.lateral) }
+            if sample.longitudinal > 0 {
+                result.accelerating = Swift.max(result.accelerating, sample.longitudinal)
+            } else {
+                result.braking = Swift.max(result.braking, -sample.longitudinal)
+            }
+            result.vertical = Swift.max(result.vertical, abs(sample.vertical))
+        }
+        return result
+    }
+
     /// The reading at a moment, interpolated so the ball moves smoothly.
     func sample(at time: Double) -> GForceSample? {
         guard samples.count > 1,

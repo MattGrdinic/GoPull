@@ -177,7 +177,8 @@ final class OverlayExporter: ObservableObject {
     /// Writes `clip` with overlays burned in to `destination`.
     func export(clip: URL, to destination: URL, track: TelemetryTrack,
                 settings: OverlaySettings, options: ExportOptions,
-                gforce: GForceTrack = GForceTrack()) async throws {
+                gforce: GForceTrack = GForceTrack(),
+                runs: [AccelerationRun] = []) async throws {
         isRunning = true
         cancelled.reset()
         clipName = clip.lastPathComponent
@@ -203,6 +204,7 @@ final class OverlayExporter: ObservableObject {
         // Built once for the whole export rather than per frame.
         let projection = RouteProjection(track.usable.map(\.coordinate))
         let maxG = OverlayComposer.maxG(for: gforce, config: settings.gforce)
+        let extremes = gforce.extremes
 
         // Always write somewhere hidden and move it into place at the end,
         // whether or not the original is being replaced.
@@ -341,7 +343,8 @@ final class OverlayExporter: ObservableObject {
                                  colorSpace: space, track: track,
                                  at: time.seconds, settings: settings,
                                  maxSpeed: maxSpeed, projection: projection,
-                                 gforce: gforce, maxG: maxG)
+                                 gforce: gforce, maxG: maxG,
+                                 extremes: extremes, runs: runs)
 
                     if !adaptor.append(target, withPresentationTime: time) {
                         continuation.resume(throwing: ExportError.cannotWrite(
@@ -423,7 +426,9 @@ final class OverlayExporter: ObservableObject {
                                             track: TelemetryTrack, at time: Double,
                                             settings: OverlaySettings, maxSpeed: Double,
                                             projection: RouteProjection,
-                                            gforce: GForceTrack, maxG: Double) {
+                                            gforce: GForceTrack, maxG: Double,
+                                            extremes: GForceTrack.Extremes,
+                                            runs: [AccelerationRun]) {
         CVPixelBufferLockBaseAddress(target, [])
         defer { CVPixelBufferUnlockBaseAddress(target, []) }
         if let source { CVPixelBufferLockBaseAddress(source, .readOnly) }
@@ -448,7 +453,8 @@ final class OverlayExporter: ObservableObject {
             memset(base, 0, CVPixelBufferGetBytesPerRow(target) * CVPixelBufferGetHeight(target))
             OverlayComposer.draw(in: context, frameSize: size, track: track, at: time,
                                  settings: settings, maxSpeed: maxSpeed,
-                                 projection: projection, gforce: gforce, maxG: maxG)
+                                 projection: projection, gforce: gforce, maxG: maxG,
+                                 extremes: extremes, runs: runs)
             return
         }
 

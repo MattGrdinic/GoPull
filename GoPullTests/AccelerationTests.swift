@@ -203,3 +203,113 @@ struct GForceExtremesTests {
         #expect(!extremes.isEmpty)
     }
 }
+
+struct AccelerationDiagnosisTests {
+
+    private func track(_ mph: [Double]) -> TelemetryTrack {
+        var track = TelemetryTrack()
+        track.samples = mph.enumerated().map { index, v in
+            GPSSample(latitude: 32, longitude: -111, altitude: 700,
+                      speed2D: v / 2.236936, speed3D: v / 2.236936,
+                      time: Double(index) / 10, timestamp: nil, dop: 2, fix: 3)
+        }
+        return track
+    }
+
+    private func stopThen(_ top: Double, over seconds: Double) -> [Double] {
+        var values = [Double](repeating: 0, count: 30)
+        let steps = Int(seconds * 10)
+        for i in 0...steps { values.append(top * Double(i) / Double(steps)) }
+        values += [Double](repeating: 0, count: 30)
+        return values
+    }
+
+    /// The common case on a trail ride: plenty of stops, none of them a launch.
+    /// "No standing start" is true and useless; the reason is what helps.
+    @Test func aClipFullOfStopsSaysWhyNoneCounted() {
+        let values = stopThen(12, over: 20) + stopThen(9, over: 25)
+        let diagnosis = AccelerationDetector.diagnose(in: track(values), settings: .init())
+        #expect(diagnosis.stops == 2)
+        #expect(diagnosis.bestSpeed > 11 && diagnosis.bestSpeed < 13)
+
+        let text = diagnosis.explanation(.init())          // targets 30 and 60
+        #expect(text.contains("2 stops"))
+        #expect(text.contains("30 mph"))
+        #expect(text.contains("lower"))
+    }
+
+    /// Reached the target, but ambled there.
+    @Test func aGentleRunIsExplainedAsGentle() {
+        var settings = AccelerationSettings()
+        settings.targets = [30]
+        let diagnosis = AccelerationDetector.diagnose(in: track(stopThen(35, over: 40)),
+                                                      settings: settings)
+        #expect(diagnosis.stops == 1)
+        #expect(diagnosis.bestSpeed > 30)
+        let text = diagnosis.explanation(settings)
+        #expect(text.contains("quickly enough"))
+    }
+
+    @Test func aClipThatNeverStopsSaysThat() {
+        let diagnosis = AccelerationDetector.diagnose(in: track(Array(repeating: 30, count: 200)),
+                                                      settings: .init())
+        #expect(diagnosis.stops == 0)
+        #expect(diagnosis.explanation(.init()).contains("never comes to a stop"))
+    }
+
+    /// The measured answer for the trail clip: dropping the target finds it.
+    @Test func aLowerTargetFindsTheRun() {
+        let values = stopThen(22, over: 9)
+        var high = AccelerationSettings(); high.targets = [30]
+        var low = AccelerationSettings(); low.targets = [20]
+        #expect(AccelerationDetector.runs(in: track(values), settings: high).isEmpty)
+        #expect(AccelerationDetector.runs(in: track(values), settings: low).count == 1)
+    }
+}
+
+struct GForcePeakOptionTests {
+
+    /// Marks and figures are separate switches: the dial markings are worth
+    /// having without the numbers around the rim.
+    @Test func eitherHalfCanBeShownAlone() {
+        var config = GForceConfig()
+        config.showsPeakMarks = true
+        config.showsPeakFigures = false
+        #expect(config.showsPeaks)
+
+        config.showsPeakMarks = false
+        config.showsPeakFigures = true
+        #expect(config.showsPeaks)
+
+        config.showsPeakFigures = false
+        #expect(!config.showsPeaks)
+    }
+
+    /// Only the figures need space outside the rim, so marks alone must not
+    /// shrink the dial.
+    @Test func onlyTheFiguresReserveMargin() {
+        let size = CGSize(width: 1920, height: 1080)
+        var config = GForceConfig()
+        config.placement = OverlayPlacement(x: 0.5, y: 0.5, scale: 0.2)
+
+        config.showsPeakMarks = true
+        config.showsPeakFigures = false
+        let marksOnly = GForceRenderer.frame(in: size, config: config)
+
+        config.showsPeakMarks = false
+        config.showsPeakFigures = true
+        let figures = GForceRenderer.frame(in: size, config: config)
+
+        #expect(figures.height > marksOnly.height)
+    }
+
+    @Test func peakOptionsSurviveEncoding() throws {
+        var settings = OverlaySettings.defaults
+        settings.gforce.showsPeakMarks = true
+        settings.gforce.showsPeakFigures = false
+        let data = try JSONEncoder().encode(settings)
+        let restored = try JSONDecoder().decode(OverlaySettings.self, from: data)
+        #expect(restored.gforce.showsPeakMarks)
+        #expect(!restored.gforce.showsPeakFigures)
+    }
+}

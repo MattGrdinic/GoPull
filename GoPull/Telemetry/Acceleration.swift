@@ -63,7 +63,87 @@ struct AccelerationSettings: Equatable, Codable {
     static let motorcycle = AccelerationSettings(targets: [30, 60])
 }
 
+/// Why a clip produced no launches, so the answer is not just "none found".
+///
+/// A clip can be full of standing starts and still report nothing, because a
+/// run has to reach the lowest target *and* average a real rate getting there.
+/// On a trail ride that is usually the whole story: eight stops, and the best
+/// of them took ninety seconds to reach 31 mph.
+struct AccelerationDiagnosis: Equatable {
+    var stops = 0
+    /// Best speed reached after any stop, in the settings' unit.
+    var bestSpeed = 0.0
+    /// Best average rate *to the lowest target*, among the stretches that
+    /// actually got there.
+    ///
+    /// Measured over the whole moving stretch instead, a 0.4-second wobble that
+    /// touched 1.1 mph reported 2.8 mph/s and made the explanation nonsense.
+    var bestRate = 0.0
+
+    func explanation(_ settings: AccelerationSettings) -> String {
+        let unit = settings.unit.label
+        guard stops > 0 else {
+            return "No standing start in this clip — it never comes to a stop with a GPS fix."
+        }
+        guard let target = settings.targets.min() else { return "No targets set." }
+        if bestSpeed < Double(target) {
+            return String(format: "%d stop%@, but the fastest reached only %.0f %@ — under the "
+                          + "%d %@ target. Try a lower one.",
+                          stops, stops == 1 ? "" : "s", bestSpeed, unit, target, unit)
+        }
+        return String(format: "%d stop%@, but none picked up quickly enough — the best averaged "
+                      + "%.1f %@ per second to %d %@. Pulling away gently is not a launch.",
+                      stops, stops == 1 ? "" : "s", bestRate, unit, target, unit)
+    }
+}
+
 enum AccelerationDetector {
+
+    /// What the clip contains, when it contains no launches.
+    static func diagnose(in track: TelemetryTrack,
+                         settings: AccelerationSettings = .init()) -> AccelerationDiagnosis {
+        let points = track.usable
+        var result = AccelerationDiagnosis()
+        guard points.count > 2 else { return result }
+        func speed(_ index: Int) -> Double {
+            settings.unit.value(fromMetresPerSecond: points[index].speed2D)
+        }
+
+        var index = 0
+        while index < points.count - 1 {
+            guard speed(index) <= settings.restSpeed else { index += 1; continue }
+            var lastAtRest = index
+            while lastAtRest + 1 < points.count, speed(lastAtRest + 1) <= settings.restSpeed {
+                lastAtRest += 1
+            }
+            var cursor = lastAtRest + 1
+            var best = 0.0
+            var reachedTargetAt: Double?
+            let target = Double(settings.targets.min() ?? 0)
+            while cursor < points.count, speed(cursor) > settings.restSpeed {
+                let now = speed(cursor)
+                best = Swift.max(best, now)
+                if reachedTargetAt == nil, target > 0, now >= target {
+                    reachedTargetAt = points[cursor].time
+                }
+                cursor += 1
+            }
+            if cursor > lastAtRest + 1 {
+                result.stops += 1
+                result.bestSpeed = Swift.max(result.bestSpeed, best)
+                // Only stretches that got to the target say anything about the
+                // rate needed to get there.
+                if let reached = reachedTargetAt {
+                    let elapsed = reached - points[lastAtRest].time
+                    if elapsed > 0 {
+                        result.bestRate = Swift.max(result.bestRate, target / elapsed)
+                    }
+                }
+            }
+            index = Swift.max(cursor, lastAtRest + 1)
+        }
+        return result
+    }
 
     /// Finds every standing start in a clip.
     ///

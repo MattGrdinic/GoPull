@@ -83,8 +83,13 @@ struct GForceConfig: Equatable, Codable {
     var maxG: Double?
     /// Seconds of trail behind the ball. Zero draws none.
     var trailSeconds: Double = 1.2
-    /// Mark how far the clip went each way, and print the numbers.
-    var showsPeaks: Bool = false
+    /// Mark how far the clip went each way, on the dial.
+    var showsPeakMarks: Bool = false
+    /// Print those peaks outside the rim.
+    var showsPeakFigures: Bool = false
+
+    /// True when either half of the peaks display is on.
+    var showsPeaks: Bool { showsPeakMarks || showsPeakFigures }
     var smoothingSeconds: Double = 0.3
     var showsReading: Bool = true
 
@@ -128,7 +133,8 @@ enum GForceRenderer {
 
     static func frame(in size: CGSize, config: GForceConfig) -> CGRect {
         var ratio = config.showsReading ? 1 + readoutStrip : 1
-        if config.showsPeaks { ratio += peakMargin }
+        // Only the figures need room outside the rim.
+        if config.showsPeakFigures { ratio += peakMargin }
         // Clamped, so switching something on cannot push the meter off the
         // frame: the box grows downward and the reading was ending up hard
         // against the bottom edge.
@@ -145,7 +151,7 @@ enum GForceRenderer {
         // The circle occupies the top square of the box; anything below it is
         // the readout strip. With peaks on it is inset so the figures have
         // clear space outside the rim instead of sitting on the face.
-        let inset = config.showsPeaks ? rect.width * peakMargin : 0
+        let inset = config.showsPeakFigures ? rect.width * peakMargin : 0
         let diameter = rect.width - inset * 2
         let dial = CGRect(x: rect.minX + inset, y: rect.maxY - inset - diameter,
                           width: diameter, height: diameter)
@@ -241,7 +247,7 @@ enum GForceRenderer {
             context.setStrokeColor(style.ball.cgColor)
             context.setLineWidth(max(radius * 0.05, 1))
             context.setLineCap(.round)
-            for (value, direction) in marks where value > 0 {
+            for (value, direction) in marks where value > 0 && config.showsPeakMarks {
                 let distance = Swift.min(value / maxG, 1.0) * reach
                 let x = centre.x + direction.dx * distance
                 let y = centre.y + direction.dy * distance
@@ -255,7 +261,7 @@ enum GForceRenderer {
             // face and in the marker's red they fought the dial rather than
             // labelling it.
             let labelAt = radius + inset * 0.55
-            for (value, direction) in marks where value > 0 {
+            for (value, direction) in marks where value > 0 && config.showsPeakFigures {
                 text(String(format: "%.2f", value),
                      centredAt: CGPoint(x: centre.x + direction.dx * labelAt,
                                         y: centre.y + direction.dy * labelAt),

@@ -184,7 +184,10 @@ struct OverlayEditorView: View {
                         slider("Trail", value: $model.settings.gforce.trailSeconds,
                                in: 0...4, format: "%.1f s")
                         Toggle("Show reading", isOn: $model.settings.gforce.showsReading)
-                        Toggle("Mark the clip's peaks", isOn: $model.settings.gforce.showsPeaks)
+                        Toggle("Peak marks on the dial",
+                               isOn: $model.settings.gforce.showsPeakMarks)
+                        Toggle("Peak figures outside",
+                               isOn: $model.settings.gforce.showsPeakFigures)
                         if model.settings.gforce.showsPeaks, !model.gForcePeaks.isEmpty {
                             Text(model.gForcePeaks)
                                 .font(.caption2).foregroundStyle(.tertiary)
@@ -199,9 +202,27 @@ struct OverlayEditorView: View {
                 section("Standing starts") {
                     Toggle("Show launch times", isOn: $model.settings.showsAcceleration)
                         .disabled(model.runs.isEmpty)
+
+                    // A run has to reach the lowest target *and* pick up
+                    // briskly, so a clip full of stops can still report none.
+                    // Which target is asked for decides most of it.
+                    HStack(spacing: 4) {
+                        Text("Targets").font(.caption2).foregroundStyle(.secondary)
+                        ForEach([10, 20, 30, 60, 100], id: \.self) { target in
+                            let on = model.settings.acceleration.detection.targets.contains(target)
+                            Button("\(target)") { model.toggleTarget(target) }
+                                .buttonStyle(.plain)
+                                .font(.caption2.weight(on ? .semibold : .regular))
+                                .foregroundStyle(on ? Color.white : Color.secondary)
+                                .padding(.horizontal, 5).padding(.vertical, 2)
+                                .background(on ? AnyShapeStyle(Color.accentColor)
+                                               : AnyShapeStyle(.quaternary),
+                                            in: Capsule())
+                        }
+                    }
+
                     if model.runs.isEmpty {
-                        Text("No standing start in this clip — it needs to begin "
-                             + "from a stop with a GPS fix.")
+                        Text(model.launchExplanation)
                             .font(.caption2).foregroundStyle(.tertiary)
                             .fixedSize(horizontal: false, vertical: true)
                     } else {
@@ -236,7 +257,11 @@ struct OverlayEditorView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             .padding(16)
+            // Clear of the scroll indicator, which was overlapping the controls
+            // at the panel's edge.
+            .padding(.trailing, 8)
         }
+        .scrollIndicators(.visible)
     }
 
     @ViewBuilder

@@ -202,6 +202,12 @@ six-minute clip — so the list can say whether a clip has GPS before an 11 GB c
 control API, so it queues behind thumbnails in `PreviewStore` and stands down during an import
 like everything else there.
 
+**Two filters decide what counts as a launch, and they surprise people.** A run must reach the
+*lowest* target — 30 mph by default, so a clip that never exceeds 25 reports nothing — and must
+average `minimumRate` getting there. A trail ride with eight stops produced zero launches for both
+reasons at once. `AccelerationDetector.diagnose` exists so the UI can say which of the two it was
+rather than "none found".
+
 **A standing start is not just "speed left zero".** Speed hovers around zero and one noisy sample
 above the threshold made an entire clip read as a single 45-second run. Departure has to *hold*,
 and a run that averages under ~1.5 mph/s to its first target is someone pulling away gently, not a

@@ -137,6 +137,25 @@ final class OverlayEditorModel: ObservableObject {
         }
     }
 
+    /// Why there are no launches, in terms of what the clip actually contains.
+    var launchExplanation: String {
+        AccelerationDetector.diagnose(in: track, settings: settings.acceleration.detection)
+            .explanation(settings.acceleration.detection)
+    }
+
+    /// Add or drop a target speed, keeping at least one.
+    func toggleTarget(_ target: Int) {
+        var targets = settings.acceleration.detection.targets
+        if let index = targets.firstIndex(of: target) {
+            guard targets.count > 1 else { return }
+            targets.remove(at: index)
+        } else {
+            targets.append(target)
+        }
+        settings.acceleration.detection.targets = targets.sorted()
+        settingsChangedRequiringResample()
+    }
+
     /// Jump the preview to a run, so a time can be checked against the footage.
     func scrub(toRun index: Int) {
         guard runs.indices.contains(index) else { return }

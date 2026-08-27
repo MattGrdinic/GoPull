@@ -305,6 +305,14 @@ struct ContentView: View {
             // A burn-in outlives the editor sheet, so it reports here too --
             // otherwise closing that sheet leaves it running with nothing to
             // show for it, and a part-written file that looks like a failure.
+            if let converting = model.convertingGPR {
+                HStack(spacing: 6) {
+                    ProgressView().controlSize(.small)
+                    Text("Converting \(converting) to DNG…")
+                    Spacer()
+                }
+                .font(.caption).foregroundStyle(.secondary)
+            }
             if model.overlayExporter.isRunning || model.isRunningOverlayQueue {
                 overlayExportProgress
             } else if let exported = model.overlayExportResult {
@@ -342,6 +350,22 @@ struct ContentView: View {
                         .toggleStyle(.checkbox)
                         .help("Include .LRV/.LRF proxies and thumbnails in the list. "
                               + "They are always visible on the mounted drive.")
+
+                    // Only offered when the card actually has raw stills on it.
+                    if model.hasGPRFiles {
+                        HStack(spacing: 6) {
+                            Toggle("GPR → DNG", isOn: $model.convertGPRToDNG)
+                                .toggleStyle(.checkbox)
+                                .help("GoPro's raw stills use VC-5 compression, which "
+                                      + "nothing on macOS can open. Converting writes a "
+                                      + "DNG beside each one, with all its colour data intact.")
+                            if model.convertGPRToDNG {
+                                Toggle("replace", isOn: $model.replaceGPRWithDNG)
+                                    .toggleStyle(.checkbox)
+                                    .help("Delete each .GPR once its .DNG has been written.")
+                            }
+                        }
+                    }
 
                     HStack(spacing: 6) {
                         Toggle("Overlays after import", isOn: $model.overlaysAfterImport)

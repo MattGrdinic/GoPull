@@ -20,6 +20,10 @@ GoPro Connect models.
   and frame rate, read from the camera. Double-click one to play it: the camera has a
   low-resolution `.LRV` proxy beside every clip, so an 11.5 GB 8K recording previews from a
   364 MB file that streams off the card without copying anything.
+* **GPR → DNG** — GoPro's raw stills are DNGs whose image tile is VC-5 compressed, which
+  nothing on macOS can decode: ImageIO reads the metadata and then produces no pixels. GoPull
+  decodes the tile and writes a real DNG beside it, keeping every colour tag, in about half a
+  second for a 8192×6144 frame.
 * **Import** — copies new clips to `~/Movies/GoPro/<date>/` at ~51 MB/s using parallel range
   requests, with progress and transfer rate. Already-imported clips are detected and skipped.
 * **Folder options** — sort clips into date folders, per-camera folders, or both. Two bodies

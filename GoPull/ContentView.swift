@@ -10,6 +10,7 @@ struct ContentView: View {
     @EnvironmentObject private var model: AppModel
     @State private var choosingDestination = false
     @State private var previewing: MediaFile?
+    @State private var editingOverlays: MediaFile?
     /// Selection is owned by SwiftUI here, not read straight off the model.
     ///
     /// `List(selection:)` writes the new value back *while it is updating the
@@ -158,6 +159,20 @@ struct ContentView: View {
                     .foregroundStyle(model.alreadyImported(file) ? .green : .secondary)
                     .help(model.alreadyImported(file) ? "Already imported" : "Not imported yet")
 
+                // Which clips want a speedometer on them. On by default, so a
+                // card of one kind of footage needs no attention; the point is
+                // turning it off for the few that do not.
+                Toggle("", isOn: Binding(
+                    get: { model.overlaysEnabled(for: file) },
+                    set: { model.setOverlaysEnabled($0, for: file) }))
+                    .toggleStyle(.checkbox)
+                    .labelsHidden()
+                    .disabled(!model.canOverlay(file))
+                    .opacity(model.canOverlay(file) ? 1 : 0.25)
+                    .help(model.canOverlay(file)
+                          ? "Give this clip an overlay when overlays are generated"
+                          : "Overlays only apply to video")
+
                 Button { preview(file) } label: { ClipThumbnail(file: file) }
                     .buttonStyle(.plain)
                     .disabled(model.importer.isRunning
@@ -211,6 +226,17 @@ struct ContentView: View {
             .contextMenu {
                 Button("Preview") { preview(file) }
                     .disabled(model.importer.isRunning || model.previewSource(for: file) == nil)
+                Button("Overlays…") { editingOverlays = file }
+                    .disabled(model.importer.isRunning || model.importedURL(for: file) == nil)
+                Divider()
+                Button("Tick All for Overlays") { model.setOverlaysEnabledForAll(true) }
+                Button("Untick All") { model.setOverlaysEnabledForAll(false) }
+                Divider()
+                Button("Generate Overlays for Selection") {
+                    model.queueOverlays(for: model.visibleFiles.filter { selection.contains($0.id) })
+                }
+                .disabled(model.isRunningOverlayQueue || model.overlayExporter.isRunning
+                          || selection.isEmpty)
             }
             .tag(file.id)
         }
@@ -225,6 +251,11 @@ struct ContentView: View {
             if let source = model.previewSource(for: file) {
                 ClipPreviewSheet(file: file, source: source,
                                  details: model.previews.details[file.id])
+            }
+        }
+        .sheet(item: $editingOverlays) { file in
+            if let url = model.importedURL(for: file) {
+                OverlayEditorView(file: file, url: url)
             }
         }
     }
@@ -256,12 +287,28 @@ struct ContentView: View {
         return model.visibleFiles.first { $0.id == id && model.previewSource(for: $0) != nil }
     }
 
+    /// Overlays are edited against the imported copy, so this stays nil until a
+    /// clip is actually on disk.
+    private var overlayTarget: MediaFile? {
+        guard !model.importer.isRunning else { return nil }
+        guard selection.count == 1, let id = selection.first else { return nil }
+        return model.visibleFiles.first { $0.id == id && model.importedURL(for: $0) != nil }
+    }
+
     // MARK: - Footer
 
     private var footer: some View {
         VStack(spacing: 10) {
             if model.importer.isRunning {
                 importProgress
+            }
+            // A burn-in outlives the editor sheet, so it reports here too --
+            // otherwise closing that sheet leaves it running with nothing to
+            // show for it, and a part-written file that looks like a failure.
+            if model.overlayExporter.isRunning || model.isRunningOverlayQueue {
+                overlayExportProgress
+            } else if let exported = model.overlayExportResult {
+                overlayExportFinished(exported)
             }
 
             HStack(alignment: .top, spacing: 14) {
@@ -297,6 +344,18 @@ struct ContentView: View {
                               + "They are always visible on the mounted drive.")
 
                     HStack(spacing: 6) {
+                        Toggle("Overlays after import", isOn: $model.overlaysAfterImport)
+                            .toggleStyle(.checkbox)
+                            .help("Run the saved overlay preset over each ticked clip "
+                                  + "once it has copied across.")
+                        if model.overlaysAfterImport {
+                            Text("\(model.overlayEligibleCount) ticked · \(model.overlayPresetSummary)")
+                                .font(.caption2).foregroundStyle(.tertiary)
+                                .lineLimit(1)
+                        }
+                    }
+
+                    HStack(spacing: 6) {
                         Toggle("Device folders", isOn: $model.separateByCamera)
                             .toggleStyle(.checkbox)
                             .help("Give each device its own folder, named after the model "
@@ -330,6 +389,16 @@ struct ContentView: View {
                     .help("Play the camera's low-resolution proxy without copying anything. "
                           + "Double-clicking a clip does the same.")
 
+                    Button {
+                        if let target = overlayTarget { editingOverlays = target }
+                    } label: {
+                        Label("Overlays", systemImage: "speedometer")
+                    }
+                    .disabled(overlayTarget == nil)
+                    .help(overlayTarget == nil
+                          ? "Import a clip first — overlays are edited against the copy on disk."
+                          : "Position the speed gauge and route map on this clip.")
+
                     Button("Import Selected") { model.importSelected() }
                     .disabled(selection.isEmpty)
 
@@ -350,6 +419,45 @@ struct ContentView: View {
                       allowedContentTypes: [.folder]) { result in
             if case .success(let url) = result { model.destination = url }
         }
+    }
+
+    private var overlayExportProgress: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            ProgressView(value: model.overlayExporter.progress.fraction)
+            HStack {
+                Label(queueLabel, systemImage: "speedometer")
+                    .lineLimit(1).truncationMode(.middle)
+                Spacer()
+                Text(String(format: "%.0f fps", model.overlayExporter.progress.framesPerSecond))
+                    .monospacedDigit()
+                Button("Cancel") {
+                    model.isRunningOverlayQueue ? model.cancelOverlayQueue()
+                                                : model.cancelOverlayExport()
+                }
+                .buttonStyle(.link)
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+    }
+
+    private var queueLabel: String {
+        let name = model.overlayExporter.clipName ?? ""
+        guard model.isRunningOverlayQueue else { return "Overlay — \(name)" }
+        let total = model.overlayQueueDone + model.overlayQueue.count
+        return "Overlay \(model.overlayQueueDone + 1) of \(total) — \(name)"
+    }
+
+    private func overlayExportFinished(_ url: URL) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+            Text("Exported")
+            Button(url.lastPathComponent) { model.revealOverlayExport() }
+                .buttonStyle(.link).lineLimit(1).truncationMode(.middle)
+            Spacer()
+        }
+        .font(.caption)
+        .foregroundStyle(.secondary)
     }
 
     private var importProgress: some View {

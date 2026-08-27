@@ -196,6 +196,12 @@ suspends and `ContentView` disables preview while `importer.isRunning`.
 **Camera present with no card looks like no camera.** `/gopro/media/list` fails either way.
 `refresh()` disambiguates with `keepAlive()`; don't collapse those branches.
 
+**The camera will hand over telemetry without the clip.** `/gopro/media/telemetry?path=` returns
+the GPMF alone as a small MP4 — about 1.3 MB per minute of footage, 8.6 MB and 0.66s for a
+six-minute clip — so the list can say whether a clip has GPS before an 11 GB copy. It is on the
+control API, so it queues behind thumbnails in `PreviewStore` and stands down during an import
+like everything else there.
+
 **A standing start is not just "speed left zero".** Speed hovers around zero and one noisy sample
 above the threshold made an entire clip read as a single 45-second run. Departure has to *hold*,
 and a run that averages under ~1.5 mph/s to its first target is someone pulling away gently, not a

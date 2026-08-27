@@ -297,6 +297,7 @@ struct ContentView: View {
                     Text(file.name)
                     if row.hasRaw { rawBadge(row) }
                     if row.isVideo { overlayBadge(file) }
+                    if row.isVideo { telemetryBadges(file) }
                     if row.isRawOnly {
                         badge("RAW", filled: true)
                             .help("A raw photo with no JPEG beside it")
@@ -363,6 +364,28 @@ struct ContentView: View {
               : "The .GPR will be skipped — click to include it")
     }
 
+    /// What the camera says is in this clip, before it is copied.
+    ///
+    /// Importing an 11 GB clip to find out it has no GPS is a slow way to learn
+    /// it, so the telemetry is fetched from the camera in the background and
+    /// the answer shown here.
+    @ViewBuilder
+    private func telemetryBadges(_ file: MediaFile) -> some View {
+        if let summary = model.previews.summaries[file.id] {
+            HStack(spacing: 3) {
+                Image(systemName: summary.hasFix ? "location.fill" : "location.slash")
+                    .font(.caption2)
+                    .foregroundStyle(summary.hasFix ? Color.accentColor : Color.secondary)
+                if summary.launches > 0 {
+                    Image(systemName: "stopwatch")
+                        .font(.caption2)
+                        .foregroundStyle(Color.accentColor)
+                }
+            }
+            .help(summary.caption(unit: .mph))
+        }
+    }
+
     /// Whether this clip gets an overlay when overlays are generated.
     private func overlayBadge(_ file: MediaFile) -> some View {
         Button {
@@ -400,6 +423,9 @@ struct ContentView: View {
         parts.append(row.folder)
         if let summary = model.previews.details[row.primary.id]?.summary, !summary.isEmpty {
             parts.append(summary)
+        }
+        if row.isVideo, let telemetry = model.previews.summaries[row.primary.id] {
+            parts.append(telemetry.caption(unit: .mph))
         }
         if row.hasRaw, !model.includesRaw(row) { parts.append("RAW skipped") }
         return parts.joined(separator: " · ")

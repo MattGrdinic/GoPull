@@ -20,6 +20,8 @@ GoPro Connect models.
   and frame rate, read from the camera. Double-click one to play it: the camera has a
   low-resolution `.LRV` proxy beside every clip, so an 11.5 GB 8K recording previews from a
   364 MB file that streams off the card without copying anything.
+* **Telemetry at a glance** — every clip shows its GPS coverage, distance, top speed and peak
+  g before anything is copied, read from the camera rather than from the file.
 * **Standing-start times** — 0–30, 0–60 and so on, detected automatically and timed from the
   accelerometer's view of the launch rather than the GPS's. A second run in the same clip is
   shown against the first.

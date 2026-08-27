@@ -121,9 +121,14 @@ enum GForceRenderer {
     /// through wherever it would sit. At 0.97 g on a 1.5 g scale the two landed
     /// on exactly the same spot.
     static let readoutStrip = 0.20
+    /// Margin kept around the dial for the peak figures, as a fraction of the
+    /// box width. The dial shrinks into it rather than the box growing, so
+    /// turning peaks on does not move the meter.
+    static let peakMargin = 0.13
 
     static func frame(in size: CGSize, config: GForceConfig) -> CGRect {
-        let ratio = config.showsReading ? 1 + readoutStrip : 1
+        var ratio = config.showsReading ? 1 + readoutStrip : 1
+        if config.showsPeaks { ratio += peakMargin }
         // Clamped, so switching something on cannot push the meter off the
         // frame: the box grows downward and the reading was ending up hard
         // against the bottom edge.
@@ -138,11 +143,14 @@ enum GForceRenderer {
                      extremes: GForceTrack.Extremes = .init()) {
         let rect = frame(in: frameSize, config: config)
         // The circle occupies the top square of the box; anything below it is
-        // the readout strip.
-        let dial = CGRect(x: rect.minX, y: rect.maxY - rect.width,
-                          width: rect.width, height: rect.width)
+        // the readout strip. With peaks on it is inset so the figures have
+        // clear space outside the rim instead of sitting on the face.
+        let inset = config.showsPeaks ? rect.width * peakMargin : 0
+        let diameter = rect.width - inset * 2
+        let dial = CGRect(x: rect.minX + inset, y: rect.maxY - inset - diameter,
+                          width: diameter, height: diameter)
         let centre = CGPoint(x: dial.midX, y: dial.midY)
-        let radius = rect.width / 2
+        let radius = diameter / 2
         let style = config.style
         guard maxG > 0 else { return }
 
@@ -208,8 +216,19 @@ enum GForceRenderer {
             context.strokePath()
         }
 
-        // The clip's high-water marks, before the trail and the ball so they
-        // sit behind what is happening now.
+        if trail.count > 1, style.trail.a > 0 {
+            context.setStrokeColor(style.trail.cgColor)
+            context.setLineWidth(max(radius * 0.035, 1))
+            context.setLineCap(.round)
+            context.setLineJoin(.round)
+            context.move(to: place(trail[0]))
+            for sample in trail.dropFirst() { context.addLine(to: place(sample)) }
+            context.strokePath()
+        }
+
+        // The clip's high-water marks, drawn after the trail so a small peak is
+        // not buried under it. On a road ride these sit at a tenth of full
+        // scale, which is exactly where the trail and the ball live.
         if config.showsPeaks, !extremes.isEmpty {
             let reach = radius * 0.86
             let marks: [(Double, CGVector)] = [
@@ -218,9 +237,9 @@ enum GForceRenderer {
                 (extremes.accelerating, CGVector(dx: 0, dy: 1)),
                 (extremes.braking, CGVector(dx: 0, dy: -1)),
             ]
-            let tick = radius * 0.10
-            context.setStrokeColor(style.ball.opacity(0.55).cgColor)
-            context.setLineWidth(max(radius * 0.045, 1))
+            let tick = radius * 0.11
+            context.setStrokeColor(style.ball.cgColor)
+            context.setLineWidth(max(radius * 0.05, 1))
             context.setLineCap(.round)
             for (value, direction) in marks where value > 0 {
                 let distance = Swift.min(value / maxG, 1.0) * reach
@@ -232,31 +251,17 @@ enum GForceRenderer {
             }
             context.strokePath()
 
-            // The number belongs on the axis it describes, not in a row of
-            // four under the dial where it has to be decoded.
-            //
-            // At a *fixed* place on each axis, not beside its own tick. Tying
-            // the label to the tick put all four in a heap in the middle
-            // whenever the peaks were small, which on a road ride they always
-            // are — 0.2 g of lateral is 13% of full scale.
-            let labelAt = radius * 0.60
+            // The figures sit outside the rim in the caption colour. On the
+            // face and in the marker's red they fought the dial rather than
+            // labelling it.
+            let labelAt = radius + inset * 0.55
             for (value, direction) in marks where value > 0 {
                 text(String(format: "%.2f", value),
                      centredAt: CGPoint(x: centre.x + direction.dx * labelAt,
                                         y: centre.y + direction.dy * labelAt),
-                     size: radius * 0.13, font: style.captionFont,
-                     color: style.ball.opacity(0.85), in: context)
+                     size: rect.width * 0.075, font: style.captionFont,
+                     color: style.caption, in: context)
             }
-        }
-
-        if trail.count > 1, style.trail.a > 0 {
-            context.setStrokeColor(style.trail.cgColor)
-            context.setLineWidth(max(radius * 0.035, 1))
-            context.setLineCap(.round)
-            context.setLineJoin(.round)
-            context.move(to: place(trail[0]))
-            for sample in trail.dropFirst() { context.addLine(to: place(sample)) }
-            context.strokePath()
         }
 
         if let reading {
@@ -276,7 +281,7 @@ enum GForceRenderer {
             let value = reading.map { String(format: "%.2f g", $0.planar) } ?? "-- g"
             text(value, centredAt: CGPoint(x: rect.midX,
                                            y: rect.minY + rect.width * readoutStrip * 0.5),
-                 size: radius * 0.30, font: style.numberFont, color: style.text, in: context)
+                 size: rect.width * 0.15, font: style.numberFont, color: style.text, in: context)
         }
     }
 

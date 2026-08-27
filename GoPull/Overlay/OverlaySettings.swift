@@ -54,10 +54,11 @@ struct OverlaySettings: Equatable, Codable {
     private static let key = "overlaySettings"
 
     static func load() -> OverlaySettings {
-        guard let data = UserDefaults.standard.data(forKey: key),
-              let decoded = try? JSONDecoder().decode(OverlaySettings.self, from: data)
-        else { return .defaults }
-        return decoded
+        guard let data = UserDefaults.standard.data(forKey: key) else { return .defaults }
+        // Merging, not a plain decode: settings saved before a field existed
+        // would otherwise fail to decode and reset a tuned look without saying
+        // so. See OverlaySettingsCoding.swift.
+        return loadMerging(data)
     }
 
     /// A one-line description of what this preset would produce.

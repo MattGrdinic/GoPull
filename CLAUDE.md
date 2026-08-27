@@ -202,6 +202,13 @@ six-minute clip — so the list can say whether a clip has GPS before an 11 GB c
 control API, so it queues behind thumbnails in `PreviewStore` and stands down during an import
 like everything else there.
 
+**Adding a field to `OverlaySettings` used to reset everyone's saved look.** Swift's synthesised
+`Codable` requires every key, so previously saved settings failed to decode and fell back to the
+defaults with nothing said. `OverlaySettings.load()` merges the stored JSON over the JSON of the
+defaults instead, so a missing key at any depth keeps its default. Nothing needs updating when the
+next overlay is added — but if you hand-write `init(from:)` for one of these types, you take that
+protection away.
+
 **Two filters decide what counts as a launch, and they surprise people.** A run must reach the
 *lowest* target — 30 mph by default, so a clip that never exceeds 25 reports nothing — and must
 average `minimumRate` getting there. A trail ride with eight stops produced zero launches for both

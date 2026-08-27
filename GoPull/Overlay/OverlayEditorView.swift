@@ -31,10 +31,10 @@ struct OverlayEditorView: View {
                     exportSection
                         .padding(16)
                 }
-                .frame(width: 300)
+                .frame(width: 320)
             }
         }
-        .frame(width: 1080, height: 700)
+        .frame(width: 1120, height: 720)
         .task { await model.start() }
         .alert("Replace \(file.name)?", isPresented: $model.confirmingReplace) {
             Button("Replace", role: .destructive) { model.export() }
@@ -257,11 +257,10 @@ struct OverlayEditorView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             .padding(16)
-            // Clear of the scroll indicator, which was overlapping the controls
-            // at the panel's edge.
-            .padding(.trailing, 8)
+            // Room for the overlay scroll indicator, which sits over the
+            // trailing edge while scrolling.
+            .padding(.trailing, 6)
         }
-        .scrollIndicators(.visible)
     }
 
     @ViewBuilder

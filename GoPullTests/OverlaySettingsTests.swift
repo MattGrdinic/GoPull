@@ -110,3 +110,67 @@ struct OverlaySettingsTests {
         #expect(OverlayComposer.maxSpeed(for: track, unit: .kph) == 100)
     }
 }
+
+struct SettingsMigrationTests {
+
+    /// Adding an overlay used to make every previously saved look fail to
+    /// decode and revert to the defaults, silently.
+    @Test func settingsSavedBeforeAFieldExistedStillLoad() throws {
+        var full = OverlaySettings.defaults
+        full.apply(.classic)
+        full.gauge.unit = .kph
+        full.gauge.placement = OverlayPlacement(x: 0.2, y: 0.8, scale: 0.3)
+        full.gauge.smoothingSeconds = 1.25
+
+        // Strip the newest sections, as older data would not have them.
+        let data = try JSONEncoder().encode(full)
+        var object = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        for key in ["showsGForce", "gforce", "showsAcceleration", "acceleration"] {
+            object.removeValue(forKey: key)
+        }
+        let older = try JSONSerialization.data(withJSONObject: object)
+
+        let loaded = OverlaySettings.loadMerging(older)
+        // What was saved survives…
+        #expect(loaded.gauge.preset == .classic)
+        #expect(loaded.gauge.unit == .kph)
+        #expect(loaded.gauge.smoothingSeconds == 1.25)
+        #expect(loaded.gauge.placement.x == 0.2)
+        // …and what is new arrives at its default rather than failing.
+        #expect(loaded.showsGForce == OverlaySettings.defaults.showsGForce)
+        #expect(loaded.acceleration.detection.targets
+                == OverlaySettings.defaults.acceleration.detection.targets)
+    }
+
+    /// A field missing from deep inside a nested value is filled in too.
+    @Test func aMissingNestedFieldIsFilledIn() throws {
+        var full = OverlaySettings.defaults
+        full.gforce.trailSeconds = 3.0
+        let data = try JSONEncoder().encode(full)
+        var object = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        if var gforce = object["gforce"] as? [String: Any] {
+            gforce.removeValue(forKey: "showsPeakMarks")
+            gforce.removeValue(forKey: "showsPeakFigures")
+            object["gforce"] = gforce
+        }
+        let older = try JSONSerialization.data(withJSONObject: object)
+
+        let loaded = OverlaySettings.loadMerging(older)
+        #expect(loaded.gforce.trailSeconds == 3.0)          // kept
+        #expect(!loaded.gforce.showsPeakMarks)              // defaulted
+    }
+
+    @Test func currentSettingsRoundTripUnchanged() throws {
+        var settings = OverlaySettings.defaults
+        settings.apply(.hiTech)
+        settings.showsGForce = true
+        settings.gforce.showsPeakMarks = true
+        let data = try JSONEncoder().encode(settings)
+        #expect(OverlaySettings.loadMerging(data) == settings)
+    }
+
+    @Test func rubbishFallsBackToTheDefaults() {
+        #expect(OverlaySettings.loadMerging(Data("not json".utf8)) == .defaults)
+        #expect(OverlaySettings.loadMerging(Data()) == .defaults)
+    }
+}

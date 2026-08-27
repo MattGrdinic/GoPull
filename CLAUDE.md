@@ -196,6 +196,21 @@ suspends and `ContentView` disables preview while `importer.isRunning`.
 **Camera present with no card looks like no camera.** `/gopro/media/list` fails either way.
 `refresh()` disambiguates with `keepAlive()`; don't collapse those branches.
 
+**GPR is a DNG that macOS cannot decode.** ImageIO reports a `.GPR` as
+`com.adobe.raw-image`, reads every DNG tag out of it, and then fails to produce a single pixel or
+a thumbnail — the tile is VC-5 compressed. `GPRConverter` decodes it with GoPro's decoder,
+vendored in `GoPull/VC5/`, and rewrites the same tag set with an uncompressed tile. Adobe's DNG
+SDK (104k lines, also in that repo) is deliberately *not* vendored; the container is rewritten by
+hand instead.
+
+**Two vendored files are renamed on purpose.** `vc5_common/syntax.c` and `vc5_common/wavelet.c`
+became `vc5_common_syntax.c` and `vc5_common_wavelet.c`, because Xcode derives object names from
+the basename and `vc5_decoder` has files of the same name. The directory layout is otherwise kept
+so `#include "syntax.h"` still resolves to the right header.
+
+**`vc5_decoder_parameters_set_default` does not set the allocator.** `mem_alloc` and `mem_free`
+are left as whatever was on the stack, so the decoder segfaults on its first allocation. Set them.
+
 **Camera must be in "GoPro Connect" USB mode**, not MTP, or nothing is discoverable.
 
 ## Testing against real hardware

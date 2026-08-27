@@ -61,6 +61,18 @@ final class AppModel: ObservableObject {
     @Published private(set) var overlayExportResult: URL?
     @Published var overlayExportError: String?
 
+    /// Convert each imported .GPR into a .DNG.
+    @Published var convertGPRToDNG: Bool {
+        didSet { UserDefaults.standard.set(convertGPRToDNG, forKey: "convertGPRToDNG") }
+    }
+    /// Delete the .GPR once a .DNG has been written from it.
+    @Published var replaceGPRWithDNG: Bool {
+        didSet { UserDefaults.standard.set(replaceGPRWithDNG, forKey: "replaceGPRWithDNG") }
+    }
+    @Published private(set) var convertingGPR: String?
+    @Published private(set) var gprConverted = 0
+    @Published var gprError: String?
+
     /// Run the saved overlay preset over each clip as it finishes importing.
     @Published var overlaysAfterImport: Bool {
         didSet { UserDefaults.standard.set(overlaysAfterImport, forKey: "overlaysAfterImport") }
@@ -89,6 +101,8 @@ final class AppModel: ObservableObject {
                 .appendingPathComponent("Movies/GoPro")
         }
         overlaysAfterImport = defaults.object(forKey: "overlaysAfterImport") as? Bool ?? false
+        convertGPRToDNG = defaults.object(forKey: "convertGPRToDNG") as? Bool ?? false
+        replaceGPRWithDNG = defaults.object(forKey: "replaceGPRWithDNG") as? Bool ?? false
         organiseByDate = defaults.object(forKey: "organiseByDate") as? Bool ?? true
         separateByCamera = defaults.object(forKey: "separateByCamera") as? Bool ?? false
         includeSidecars = defaults.object(forKey: "includeSidecars") as? Bool ?? false
@@ -345,6 +359,42 @@ final class AppModel: ObservableObject {
         NSWorkspace.shared.open(destination)
     }
 
+    // MARK: - GPR
+
+    var hasGPRFiles: Bool { visibleFiles.contains { GPRConverter.isGPR(URL(fileURLWithPath: $0.name)) } }
+
+    /// Converts the GPRs among these clips, one at a time.
+    ///
+    /// A GPR is a DNG whose tile is VC-5 compressed, which nothing on macOS can
+    /// decode -- ImageIO reads the metadata and then produces no pixels at all.
+    /// The conversion is what makes the file openable anywhere else.
+    func convertGPRs(_ files: [MediaFile]) async {
+        let gprs = files.compactMap { file -> URL? in
+            guard GPRConverter.isGPR(URL(fileURLWithPath: file.name)) else { return nil }
+            let url = destinationURL(for: file)
+            return FileManager.default.fileExists(atPath: url.path) ? url : nil
+        }
+        guard !gprs.isEmpty else { return }
+
+        for gpr in gprs {
+            convertingGPR = gpr.lastPathComponent
+            let replace = replaceGPRWithDNG
+            let result = await Task.detached(priority: .utility) { () -> Result<URL, Error> in
+                do { return .success(try GPRConverter.convert(gpr)) }
+                catch { return .failure(error) }
+            }.value
+            switch result {
+            case .success:
+                gprConverted += 1
+                // Only after the DNG is safely written, and only if asked.
+                if replace { try? FileManager.default.removeItem(at: gpr) }
+            case .failure(let error):
+                gprError = "\(gpr.lastPathComponent): \(error.localizedDescription)"
+            }
+        }
+        convertingGPR = nil
+    }
+
     // MARK: - Overlay export
 
     var isExportingOverlay: Bool { overlayExportTask != nil }
@@ -597,11 +647,16 @@ final class AppModel: ObservableObject {
         }
         if !Task.isCancelled { await refresh() }
 
+        let done = chosen.filter { file in !failures.contains { $0.0.id == file.id } }
+
+        if convertGPRToDNG, !Task.isCancelled {
+            await convertGPRs(done)
+        }
+
         // Overlays run after the copy, not during it: both want the disk and
         // the CPU, and an import that is already the long pole should not be
         // made longer.
         if overlaysAfterImport, !Task.isCancelled {
-            let done = chosen.filter { file in !failures.contains { $0.0.id == file.id } }
             queueOverlays(for: done)
         }
     }

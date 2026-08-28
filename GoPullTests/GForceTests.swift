@@ -347,3 +347,45 @@ struct GravityRemovalTests {
         #expect(GForceReader.track(from: accl, gravity: []).isEmpty)
     }
 }
+
+/// Which way the ball moves. It shows what the rider is thrown by, the way a
+/// car's g-meter and a mechanical bubble do — not the vehicle's acceleration
+/// vector. The telemetry stays in the vehicle frame; only the drawing flips.
+struct GForceDirectionTests {
+
+    /// Offsets are in Core Graphics coordinates: y positive is up the screen.
+    private func ball(longitudinal: Double = 0, lateral: Double = 0) -> CGPoint {
+        GForceRenderer.offset(for: GForceSample(time: 0, lateral: lateral,
+                                                longitudinal: longitudinal, vertical: 0),
+                              reach: 100, maxG: 1.0)
+    }
+
+    @Test func underPowerTheBallGoesBack() {
+        let point = ball(longitudinal: 0.6)
+        #expect(point.y < -1)                    // down the screen
+        #expect(abs(point.x) < 0.001)
+    }
+
+    @Test func underBrakesTheBallGoesForward() {
+        #expect(ball(longitudinal: -0.6).y > 1)  // up the screen
+    }
+
+    /// A left-hander throws the rider right. `lateral` is the vehicle's
+    /// rightward acceleration (r = +0.93 against v·dheading/dt on GX010053),
+    /// so a left turn is negative.
+    @Test func aLeftHanderPushesTheBallRight() {
+        let point = ball(lateral: -0.6)
+        #expect(point.x > 1)
+        #expect(abs(point.y) < 0.001)
+    }
+
+    @Test func aRightHanderPushesTheBallLeft() {
+        #expect(ball(lateral: 0.6).x < -1)
+    }
+
+    /// However hard the hit, the ball stays inside the outer ring.
+    @Test func theBallIsClampedToTheRing() {
+        let point = ball(longitudinal: 5, lateral: 5)
+        #expect((point.x * point.x + point.y * point.y).squareRoot() <= 100.001)
+    }
+}

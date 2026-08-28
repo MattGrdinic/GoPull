@@ -678,3 +678,34 @@ GX010053 the bike reads +0.04 g standing still, and the absolute threshold
 tripped on that at 211.58s when the push does not begin until 212.0s. Against
 the baseline it lands at 211.99s, and the run reads 2.28s where the rider
 counted 2.2.
+
+
+## 33. The ball shows what the rider feels, not what the vehicle does
+
+The meter drew the vehicle's acceleration vector: under power the ball went up.
+That is the convention of a racing G-G or friction-circle plot, and it is not the
+convention of the g-meter in a car or of a mechanical bubble, both of which move
+the way the occupant is thrown. In a first-person shot the second reading is the
+obvious one — under power you go back, so the ball goes back. Asked, the rider
+picked that one immediately.
+
+Nothing was wrong with the numbers, and this only became visible once #32 made
+the longitudinal channel work: with it stuck near zero the ball never moved
+vertically, so the direction never came up.
+
+The telemetry stays in the vehicle frame — `longitudinal` positive under power,
+`lateral` positive turning right — because that is what the peak names mean and
+what the launch detector reads. Only the drawing negates, in one place. The peak
+marks negate with it: the hardest right-hander threw the rider left, so
+`extremes.right` is drawn on the left.
+
+The lateral sign was re-derived first rather than flipped on faith, since its
+original figure (r = -0.54) was measured through the broken gravity removal.
+Against v·dheading/dt on GX010053 it now correlates at **r = +0.933**, which
+confirms `lateral` is the vehicle's rightward acceleration and that both channels
+are consistently in the vehicle frame.
+
+`GForceRenderer.offset(for:reach:maxG:)` exists so this is testable as a contract
+rather than by scanning pixels for a red blob — the first attempt at that test
+failed twice on bitmap row order, which is a good sign the test was measuring the
+wrong thing.

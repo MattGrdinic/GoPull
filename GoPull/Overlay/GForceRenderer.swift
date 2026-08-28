@@ -4,8 +4,12 @@
 //
 //  A g-force meter: a ball on a target, the way racing telemetry shows it.
 //
-//  Lateral across, longitudinal up and down, so braking pulls the ball toward
-//  the viewer and a left-hander pushes it left. Rings mark whole and half g.
+//  The ball moves the way the rider is thrown, which is what a g-meter in a car
+//  does and what a mechanical bubble does: under power it goes back, under
+//  brakes it goes forward, and a left-hander pushes it right. That is the
+//  opposite of the vehicle's acceleration vector, so both channels are negated
+//  on the way in -- the telemetry itself stays in the vehicle frame, where
+//  `accelerating` means under power. Rings mark whole and half g.
 //  A short trail is drawn behind it, because a single dot tells you the number
 //  and the trail tells you what the rider just did.
 //
@@ -143,6 +147,26 @@ enum GForceRenderer {
     }
 
     /// `trail` is the recent history, oldest first, in the same units.
+    /// Where a reading sits, as an offset from the meter's centre in points,
+    /// in Core Graphics coordinates so y is positive upwards.
+    ///
+    /// Negated, because the ball shows what the rider is thrown by rather than
+    /// what the vehicle does: under power you go back, so the ball goes down.
+    /// The telemetry stays in the vehicle frame, where `longitudinal` is
+    /// positive under power and `lateral` is positive turning right.
+    static func offset(for sample: GForceSample, reach: Double, maxG: Double) -> CGPoint {
+        guard maxG > 0 else { return .zero }
+        let scale = reach / maxG
+        var x = sample.lateral * scale
+        var y = sample.longitudinal * scale
+        let distance = (x * x + y * y).squareRoot()
+        if distance > reach, distance > 0 {
+            x *= reach / distance
+            y *= reach / distance
+        }
+        return CGPoint(x: -x, y: -y)
+    }
+
     static func draw(_ reading: GForceSample?, trail: [GForceSample],
                      in context: CGContext, frameSize: CGSize,
                      config: GForceConfig, maxG: Double,
@@ -184,18 +208,8 @@ enum GForceRenderer {
         /// clip region still lets it draw — a dot floating on the footage with
         /// nothing around it.
         func place(_ sample: GForceSample) -> CGPoint {
-            let reach = radius * 0.86
-            let scale = reach / maxG
-            var x = sample.lateral * scale
-            var y = sample.longitudinal * scale
-            let distance = (x * x + y * y).squareRoot()
-            if distance > reach, distance > 0 {
-                x *= reach / distance
-                y *= reach / distance
-            }
-            // Braking is negative longitudinal and should pull the ball down,
-            // and Core Graphics y goes up, so the sign works out directly.
-            return CGPoint(x: centre.x + x, y: centre.y + y)
+            let o = offset(for: sample, reach: radius * 0.86, maxG: maxG)
+            return CGPoint(x: centre.x + o.x, y: centre.y + o.y)
         }
 
         // Rings at each whole or half g that fits.
@@ -237,11 +251,14 @@ enum GForceRenderer {
         // scale, which is exactly where the trail and the ball live.
         if config.showsPeaks, !extremes.isEmpty {
             let reach = radius * 0.86
+            // Each mark sits where the ball was when it set that peak, so
+            // these are negated the same way: the hardest right-hander threw
+            // the rider left, and the hardest launch threw them back.
             let marks: [(Double, CGVector)] = [
-                (extremes.right, CGVector(dx: 1, dy: 0)),
-                (extremes.left, CGVector(dx: -1, dy: 0)),
-                (extremes.accelerating, CGVector(dx: 0, dy: 1)),
-                (extremes.braking, CGVector(dx: 0, dy: -1)),
+                (extremes.right, CGVector(dx: -1, dy: 0)),
+                (extremes.left, CGVector(dx: 1, dy: 0)),
+                (extremes.accelerating, CGVector(dx: 0, dy: -1)),
+                (extremes.braking, CGVector(dx: 0, dy: 1)),
             ]
             let tick = radius * 0.11
             context.setStrokeColor(style.ball.cgColor)

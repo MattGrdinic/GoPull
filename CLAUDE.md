@@ -261,6 +261,13 @@ residual carries a small per-clip bias (mounting, and GRAV's fusion), so an abso
 is not the same threshold on every clip: a bike reading +0.04 g standing still tripped a 0.05 g
 test half a second before it moved.
 
+**The g-meter ball moves the way the rider is thrown, not the way the vehicle accelerates.**
+Under power it goes back, under brakes forward, and a left-hander pushes it right — a car's
+g-meter, not a racing G-G plot. The telemetry stays in the vehicle frame (`longitudinal`
+positive under power, `lateral` positive turning right, confirmed at r = +0.93 against
+v·dheading/dt); only `GForceRenderer.offset` negates, and the peak marks negate with it. That
+function is separate from `draw` so the direction is testable without scanning pixels.
+
 **Scale the g-meter from the smoothed track, not the raw one.** A single bump put the raw peak at
 2.82 g against 1.01 g smoothed, and full scale at 4 g left the ball in the middle for a whole ride.
 

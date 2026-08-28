@@ -193,6 +193,12 @@ region of a row by hand.
 API that must stay untouched during an import, and playback would be a fifth stream. `PreviewStore`
 suspends and `ContentView` disables preview while `importer.isRunning`.
 
+**The exporter composes in one place on purpose.** `composite` used to have two
+`OverlayComposer.draw` calls, and the burn-in one was missing `extremes:` and `runs:`. Both
+have defaults, so it compiled and silently dropped the g-force peak marks and the whole launch
+badge from every burned-in export while the editor preview looked right. Both paths now share
+one call. If you add overlay state, it flows to preview and export together or not at all.
+
 **Time launches on the raw track, and anchor to the rest *before the departure*.** Smoothing is
 a drawing tool: a trailing average delays every threshold crossing by about half its window and
 fills in the dip between two back-to-back launches, so at the default 0.5s the two runs in

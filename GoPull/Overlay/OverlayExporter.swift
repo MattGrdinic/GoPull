@@ -446,18 +446,32 @@ final class OverlayExporter: ObservableObject {
                           | CGBitmapInfo.byteOrder32Little.rawValue)
         else { return }
 
-        guard let source else {
+        // One `draw` for both paths, deliberately. There used to be two -- an
+        // early return for the overlay-only case and another at the end for the
+        // burn-in -- and the second one was missing `extremes:` and `runs:`.
+        // Both have defaults, so it compiled and silently dropped the g-force
+        // peak marks and the whole launch badge from every burned-in export
+        // while the editor preview, which passes them, looked right.
+        if let source {
+            copy(source, into: base, target: target, size: size)
+        } else {
             // Overlay only: start from transparency. Pool buffers are recycled,
             // so the previous frame is still in them and must be cleared, or the
             // overlay smears across the whole export.
             memset(base, 0, CVPixelBufferGetBytesPerRow(target) * CVPixelBufferGetHeight(target))
-            OverlayComposer.draw(in: context, frameSize: size, track: track, at: time,
-                                 settings: settings, maxSpeed: maxSpeed,
-                                 projection: projection, gforce: gforce, maxG: maxG,
-                                 extremes: extremes, runs: runs)
-            return
         }
 
+        OverlayComposer.draw(in: context, frameSize: size, track: track, at: time,
+                             settings: settings, maxSpeed: maxSpeed,
+                             projection: projection, gforce: gforce, maxG: maxG,
+                             extremes: extremes, runs: runs)
+    }
+
+    /// Puts the source frame into the target buffer, scaling if the export is
+    /// smaller than the clip.
+    private nonisolated static func copy(_ source: CVPixelBuffer,
+                                         into base: UnsafeMutableRawPointer,
+                                         target: CVPixelBuffer, size: CGSize) {
         let sourceWidth = CVPixelBufferGetWidth(source)
         let sourceHeight = CVPixelBufferGetHeight(source)
         let scaling = sourceWidth != Int(size.width) || sourceHeight != Int(size.height)
@@ -492,9 +506,5 @@ final class OverlayExporter: ObservableObject {
             vImageScale_ARGB8888(&input, &output, nil,
                                  vImage_Flags(kvImageNoFlags))
         }
-
-        OverlayComposer.draw(in: context, frameSize: size, track: track, at: time,
-                             settings: settings, maxSpeed: maxSpeed,
-                             projection: projection, gforce: gforce, maxG: maxG)
     }
 }

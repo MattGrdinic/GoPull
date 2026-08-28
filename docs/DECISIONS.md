@@ -565,3 +565,30 @@ wholesale — by pushing an empty camera IP through `update(cameraIP:)` — left
 row showing a blank placeholder, because a row asks for its preview from `.task` and that does
 not run again for rows that stayed on screen. Deleting one clip says nothing about any other
 clip's thumbnail, so there was never a reason to drop them.
+
+
+## 29. The exporter composes overlays in one place, not two
+
+`composite` had two `OverlayComposer.draw` calls — an early return for the
+overlay-only case and another at the end for the burn-in. The second was missing
+`extremes:` and `runs:`. Both have defaults (`.init()` and `[]`), so it compiled
+and ran, and silently dropped the g-force peak marks and the entire launch badge
+from every burned-in export while the editor preview, which passes them, looked
+correct. Alpha exports were fine, which made it look like a rendering problem
+rather than an argument-passing one.
+
+The two paths now converge on a single `draw`, with the frame copy moved into its
+own `copy(_:into:target:size:)`. Adding an overlay that needs new state can no
+longer light up in the preview and go missing in the export.
+
+The badge's unreached rows showed the running clock, dimmed. Mid-launch that read
+`0-60 mph  2.33s` on a bike that never saw 60 mph in the clip — the dimming is not
+enough to say "this has not happened". The clock already ticks on the LAUNCH line,
+so unreached targets now show a dash.
+
+`AccelerationConfig.holdSeconds` was declared and never read; a hardcoded `+ 3` in
+`run(at:)` decided how long the result stayed up. `run(at:hold:)` takes it now.
+
+Verified by exporting GX010050 and sampling frames: at 12.0s the panel reads
+LAUNCH 4.83s / 0-30 mph 3.35s / 0-60 mph —, and the g-meter carries its red ticks
+and peak figures.

@@ -47,7 +47,7 @@ enum OverlayComposer {
         }
 
         if settings.showsAcceleration, !runs.isEmpty {
-            let current = runs.run(at: time)
+            let current = runs.run(at: time, hold: settings.acceleration.holdSeconds)
             let best = current.flatMap { run -> AccelerationRun? in
                 guard let first = run.reached.first else { return nil }
                 return runs.filter { $0.start < run.start }.best(to: first)

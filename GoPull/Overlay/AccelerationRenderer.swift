@@ -173,11 +173,15 @@ enum AccelerationRenderer {
                          align: .right, in: context)
                 }
             } else {
-                // Not reached yet: show the clock so the panel is alive.
-                let pending = elapsed > 0 ? String(format: "%.2fs", elapsed) : "—"
-                text(pending, at: CGPoint(x: rect.maxX - rect.width * 0.09, y: y),
+                // Not reached yet: a placeholder, not the running clock.
+                //
+                // The clock already ticks on the LAUNCH line above. Repeating
+                // it against every target read as a result: mid-launch the
+                // panel said "0-60 mph  2.33s" on a bike that never saw 60 in
+                // the clip, which is worse than saying nothing.
+                text("—", at: CGPoint(x: rect.maxX - rect.width * 0.09, y: y),
                      size: rect.width * 0.11, font: style.numberFont,
-                     color: style.value.opacity(0.45), align: .right, in: context)
+                     color: style.value.opacity(0.35), align: .right, in: context)
             }
         }
     }

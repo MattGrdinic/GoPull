@@ -158,6 +158,9 @@ struct AccelerationTests {
         #expect(runs.run(at: 60) == nil)
         // The result stays up for a few seconds after the run ends.
         #expect(runs.run(at: 22)?.start == 10)
+        // And `holdSeconds` decides how long, rather than a hardcoded 3.
+        #expect(runs.run(at: 25, hold: 6)?.start == 10)
+        #expect(runs.run(at: 25, hold: 3) == nil)
     }
 
     // MARK: - Settings

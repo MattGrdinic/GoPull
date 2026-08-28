@@ -505,3 +505,207 @@ log show --last 5m --predicate 'eventMessage CONTAINS "Publishing changes"' --st
 
 Under Xcode the same warning can pause the app, which is why it looks far worse there than in a
 standalone run.
+
+## 27. Launches are timed on the raw track, anchored to the rest before them
+
+Two separate faults, both found on `GX010050` — a clip with two real standing starts that
+the app timed as one 7-second run when the rider counted about four.
+
+**The anchor.** `runs()` walked forward to the first sample above `restSpeed`, called that the
+end of "rest", and then let `departureIndex` scan on until speed genuinely held above
+`movingSpeed`. Those two can be a long way apart. On `GX010050` two samples of GPS noise at
+0.1s ended the rest; the bike then sat still until 6.8s and launched; the run was still timed
+from 0.1s. A 3.32-second 0-30 was reported as **10.05s**. The clock now starts at the last
+sample at rest *before that departure*, found by walking back from it:
+
+```swift
+var anchor = departure - 1
+while anchor > lastAtRest, speed(anchor) > settings.restSpeed { anchor -= 1 }
+lastAtRest = anchor
+```
+
+**The smoothing.** Detection ran on the same smoothed track the gauge draws from. A trailing
+average is a drawing tool — it exists to settle the needle — and it does two things to a
+measurement: it delays every threshold crossing by roughly half its window, and it fills in
+the dip between two back-to-back launches. At the default 0.5s, `GX010050`'s two runs came
+back as **one**. Detection now takes the raw track at every call site (`OverlayEditor`,
+`AppModel`, `TelemetrySummary`); `smoothed()` is only ever applied to what gets rendered.
+
+The accelerometer is the exception, and it is smoothed *inside* the detector by a fixed 0.1s.
+Raw at 200 Hz, the noise floor alone can hold 0.02 g for the 20 samples the sustained-push
+check asks for, which pins the start early. Doing it in the detector rather than at the call
+site also means a reported 0-60 does not move when the display smoothing slider does.
+
+Verified on the card: 0-30 of 3.32s and 4.54s, against interpolated 30 mph crossings at
+10.390s and 29.800s and rest ending at 7.07s and 25.26s.
+
+## 28. Deleting names the files, and separates the backed from the unbacked
+
+The camera has no trash. `/gopro/media/delete/file?path=…` is immediate and there is nothing
+to undo it with, so the confirmation is a sheet rather than an alert: it lists the shots by
+name and splits them into those with a verified full-size copy in the destination and those
+without. That split is the only thing that matters — a backed shot can be pulled back from
+disk, an unbacked one is the only copy there is — so it drives the warning, the button label
+and the ordering.
+
+`DeletionPlan` lives outside `AppModel` and takes an `isBacked` closure, so what the sheet
+claims can be tested without the `@MainActor` singleton. A shot counts as backed only when
+*every* file of it does, which is what makes a JPEG whose paired GPR never came across still
+read as the only copy of that raw.
+
+Delete is on the context menu, not the footer, and the destructive button is not the default
+action — it should take a deliberate click, not a stray Return. It is disabled outright while
+an import is running, for the same reason nothing else touches the control API then (#12).
+
+Tested against the card: 53 files to 52, the target returning 404 afterwards and every other
+file still listed.
+
+Afterwards the store forgets only the files that went, not everything it knows. Clearing it
+wholesale — by pushing an empty camera IP through `update(cameraIP:)` — left every remaining
+row showing a blank placeholder, because a row asks for its preview from `.task` and that does
+not run again for rows that stayed on screen. Deleting one clip says nothing about any other
+clip's thumbnail, so there was never a reason to drop them.
+
+
+## 29. The exporter composes overlays in one place, not two
+
+`composite` had two `OverlayComposer.draw` calls — an early return for the
+overlay-only case and another at the end for the burn-in. The second was missing
+`extremes:` and `runs:`. Both have defaults (`.init()` and `[]`), so it compiled
+and ran, and silently dropped the g-force peak marks and the entire launch badge
+from every burned-in export while the editor preview, which passes them, looked
+correct. Alpha exports were fine, which made it look like a rendering problem
+rather than an argument-passing one.
+
+The two paths now converge on a single `draw`, with the frame copy moved into its
+own `copy(_:into:target:size:)`. Adding an overlay that needs new state can no
+longer light up in the preview and go missing in the export.
+
+The badge's unreached rows showed the running clock, dimmed. Mid-launch that read
+`0-60 mph  2.33s` on a bike that never saw 60 mph in the clip — the dimming is not
+enough to say "this has not happened". The clock already ticks on the LAUNCH line,
+so unreached targets now show a dash.
+
+`AccelerationConfig.holdSeconds` was declared and never read; a hardcoded `+ 3` in
+`run(at:)` decided how long the result stayed up. `run(at:hold:)` takes it now.
+
+Verified by exporting GX010050 and sampling frames: at 12.0s the panel reads
+LAUNCH 4.83s / 0-30 mph 3.35s / 0-60 mph —, and the g-meter carries its red ticks
+and peak figures.
+
+
+## 30. G-force peaks are what has happened, not what will
+
+The peak marks were the whole clip's extremes, computed once and drawn on every
+frame. That is a spoiler and it is also not a peak: a mark sitting at 1.14 g from
+the first frame gives away a corner a minute away, and never moves, so it reads as
+decoration rather than a record.
+
+`GForceTrack.RunningExtremes` is a prefix maximum over the track: `at(time)` gives
+what had been reached by then, so a mark appears at the moment it is set and holds
+until it is beaten. Bucketed at 20 Hz, because the values only ever climb and a
+bucket therefore costs at most 50 ms of freshness -- under two frames. Per sample
+instead, a ten-minute clip at 200 Hz would carry 120,000 entries; at 20 Hz it is
+12,000. Lookup is a binary search, so the per-frame cost is a handful of compares.
+
+The meter's *scale* stays whole-clip. A full scale that grew during playback would
+move the ball without the bike doing anything.
+
+Verified on GX010050: the four figures climb through the clip, never fall, and end
+exactly equal to `extremes` for the whole track.
+
+## 31. The launch badge can count in
+
+`showsCountdown` brings the panel up for `countdownSeconds` before a detected run
+and shows the time remaining, red for the last second.
+
+It earns its place twice. For a viewer it says a run is coming, which a badge that
+appears at the same instant as the launch cannot. For us it makes the detected
+start *observable*: the count reaching zero while the bike is still stationary is
+exactly the smoothing-and-latency error that #27 was about, and now it can be seen
+in the footage and measured rather than inferred from numbers in a panel. That is
+why the countdown shows tenths rather than whole seconds.
+
+`run(at:hold:lead:)` carries the window; the renderer draws the count-in state when
+`elapsed` is negative and returns before the target rows, so a run's splits never
+appear before it starts.
+
+
+## 32. Gravity comes from GRAV, not from a low pass
+
+The g-meter read 0.03 g during a 2.2-second 0-30 that really pulled 0.6 g.
+
+Gravity was estimated by low-passing ACCL over one second and subtracting it.
+That cannot work, and not because the window was wrong: a low pass cannot tell
+gravity from a sustained acceleration, and a standing start is precisely a
+sustained acceleration. A one-second average of a two-second pull *is* the pull.
+Measured on GX010053, the fraction of a real 0.63 g that survived was 4% at a
+one-second window, 27% at five seconds, 40% at twenty. There is no window that
+fixes it.
+
+The camera ships `GRAV`, a gravity unit vector at 30 Hz, which is the right
+input. Its axes are ordered differently from ACCL's, which is what the old note
+about the two streams disagreeing was seeing. The pairing was established by
+taking the clip-average residual for all nine combinations: the bike averages no
+acceleration over four minutes, so the correct pairing is the one that leaves
+nothing behind.
+
+|         | GRAV0  | GRAV1  | GRAV2  |
+|---------|--------|--------|--------|
+| ACCL0   | +1.044 | **+0.034** | +0.952 |
+| ACCL1   | **+0.022** | -0.988 | -0.071 |
+| ACCL2   | +0.104 | -0.906 | **+0.011** |
+
+ACCL's first two axes are swapped relative to GRAV's; nothing is sign-flipped.
+The vehicle mapping is unchanged and is confirmed by this: longitudinal is
+axis 2 negated, and against GPS it now correlates at r = -0.86 over the whole
+clip, against +0.04 before.
+
+Across six launches in GX010053 the reported mean is 89% of what GPS says the
+run required (77-95%), and the clip the report came from reads 0.57 g against a
+true 0.60. Gentler launches read lower — GX010050's two four-second pulls come
+back at 63% — which is expected: GRAV is itself a fused estimate and drifts into
+a long, gentle acceleration, and the GPS figure averages the whole 0-30
+including the roll-out. The low-pass path is kept for clips with no GRAV stream,
+with the window widened to ten seconds as the least-bad option.
+
+One consequence worth knowing: this changes launch *timing* too, because the
+start refinement reads the longitudinal channel, which used to be near zero.
+The threshold is now measured against the clip's own resting baseline. The
+residual carries a small per-clip bias -- how the camera sits, plus GRAV's
+fusion -- so an absolute 0.05 g is not the same threshold on every clip: on
+GX010053 the bike reads +0.04 g standing still, and the absolute threshold
+tripped on that at 211.58s when the push does not begin until 212.0s. Against
+the baseline it lands at 211.99s, and the run reads 2.28s where the rider
+counted 2.2.
+
+
+## 33. The ball shows what the rider feels, not what the vehicle does
+
+The meter drew the vehicle's acceleration vector: under power the ball went up.
+That is the convention of a racing G-G or friction-circle plot, and it is not the
+convention of the g-meter in a car or of a mechanical bubble, both of which move
+the way the occupant is thrown. In a first-person shot the second reading is the
+obvious one — under power you go back, so the ball goes back. Asked, the rider
+picked that one immediately.
+
+Nothing was wrong with the numbers, and this only became visible once #32 made
+the longitudinal channel work: with it stuck near zero the ball never moved
+vertically, so the direction never came up.
+
+The telemetry stays in the vehicle frame — `longitudinal` positive under power,
+`lateral` positive turning right — because that is what the peak names mean and
+what the launch detector reads. Only the drawing negates, in one place. The peak
+marks negate with it: the hardest right-hander threw the rider left, so
+`extremes.right` is drawn on the left.
+
+The lateral sign was re-derived first rather than flipped on faith, since its
+original figure (r = -0.54) was measured through the broken gravity removal.
+Against v·dheading/dt on GX010053 it now correlates at **r = +0.933**, which
+confirms `lateral` is the vehicle's rightward acceleration and that both channels
+are consistently in the vehicle frame.
+
+`GForceRenderer.offset(for:reach:maxG:)` exists so this is testable as a contract
+rather than by scanning pixels for a red blob — the first attempt at that test
+failed twice on bitmap row order, which is a good sign the test was measuring the
+wrong thing.

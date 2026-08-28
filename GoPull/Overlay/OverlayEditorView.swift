@@ -31,10 +31,10 @@ struct OverlayEditorView: View {
                     exportSection
                         .padding(16)
                 }
-                .frame(width: 300)
+                .frame(width: 320)
             }
         }
-        .frame(width: 1080, height: 700)
+        .frame(width: 1120, height: 720)
         .task { await model.start() }
         .alert("Replace \(file.name)?", isPresented: $model.confirmingReplace) {
             Button("Replace", role: .destructive) { model.export() }
@@ -172,6 +172,81 @@ struct OverlayEditorView: View {
                     slider("Rim", value: $model.settings.map.style.rim.a, in: 0...1)
                 }
 
+                section("G-force") {
+                    Toggle("Show g-force meter", isOn: $model.settings.showsGForce)
+                        .disabled(!model.hasGForce)
+                    Text(model.gForceSummary)
+                        .font(.caption2).foregroundStyle(.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if model.settings.showsGForce, model.hasGForce {
+                        slider("Size", value: $model.settings.gforce.placement.scale,
+                               in: 0.08...0.35)
+                        slider("Trail", value: $model.settings.gforce.trailSeconds,
+                               in: 0...4, format: "%.1f s")
+                        Toggle("Show reading", isOn: $model.settings.gforce.showsReading)
+                        Toggle("Peak marks on the dial",
+                               isOn: $model.settings.gforce.showsPeakMarks)
+                        Toggle("Peak figures outside",
+                               isOn: $model.settings.gforce.showsPeakFigures)
+                        if model.settings.gforce.showsPeaks, !model.gForcePeaks.isEmpty {
+                            Text(model.gForcePeaks)
+                                .font(.caption2).foregroundStyle(.tertiary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                }
+                .onChange(of: model.settings.gforce.smoothingSeconds) { _, _ in
+                    model.settingsChangedRequiringResample()
+                }
+
+                section("Standing starts") {
+                    Toggle("Show launch times", isOn: $model.settings.showsAcceleration)
+                        .disabled(model.runs.isEmpty)
+
+                    // A run has to reach the lowest target *and* pick up
+                    // briskly, so a clip full of stops can still report none.
+                    // Which target is asked for decides most of it.
+                    HStack(spacing: 4) {
+                        Text("Targets").font(.caption2).foregroundStyle(.secondary)
+                        ForEach([10, 20, 30, 60, 100], id: \.self) { target in
+                            let on = model.settings.acceleration.detection.targets.contains(target)
+                            Button("\(target)") { model.toggleTarget(target) }
+                                .buttonStyle(.plain)
+                                .font(.caption2.weight(on ? .semibold : .regular))
+                                .foregroundStyle(on ? Color.white : Color.secondary)
+                                .padding(.horizontal, 5).padding(.vertical, 2)
+                                .background(on ? AnyShapeStyle(Color.accentColor)
+                                               : AnyShapeStyle(.quaternary),
+                                            in: Capsule())
+                        }
+                    }
+
+                    if model.runs.isEmpty {
+                        Text(model.launchExplanation)
+                            .font(.caption2).foregroundStyle(.tertiary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } else {
+                        ForEach(Array(model.runSummaries.enumerated()), id: \.offset) { index, line in
+                            Button(line) { model.scrub(toRun: index) }
+                                .buttonStyle(.link)
+                                .font(.caption2.monospacedDigit())
+                        }
+                        if model.settings.showsAcceleration {
+                            slider("Size", value: $model.settings.acceleration.placement.scale,
+                                   in: 0.12...0.40)
+                            Toggle("Compare with the best run",
+                                   isOn: $model.settings.acceleration.comparesToBest)
+                            Toggle("Count in to the launch",
+                                   isOn: $model.settings.acceleration.showsCountdown)
+                            if model.settings.acceleration.showsCountdown {
+                                slider("Count from",
+                                       value: $model.settings.acceleration.countdownSeconds,
+                                       in: 2...10, format: "%.0f s")
+                            }
+                        }
+                    }
+                }
+
                 section("Smoothing") {
                     slider("Window", value: Binding(
                         get: { model.settings.gauge.smoothingSeconds },
@@ -189,6 +264,9 @@ struct OverlayEditorView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             .padding(16)
+            // Room for the overlay scroll indicator, which sits over the
+            // trailing edge while scrolling.
+            .padding(.trailing, 6)
         }
     }
 

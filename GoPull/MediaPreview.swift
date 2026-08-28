@@ -79,6 +79,8 @@ final class PreviewStore: ObservableObject {
 
     @Published private(set) var thumbnails: [String: NSImage] = [:]
     @Published private(set) var details: [String: MediaDetails] = [:]
+    /// What each clip's telemetry holds, so the list can say before a copy.
+    @Published private(set) var summaries: [String: TelemetrySummary] = [:]
 
     private var cameraIP = ""
     private var queue: [MediaFile] = []
@@ -105,9 +107,27 @@ final class PreviewStore: ObservableObject {
         self.cameraIP = cameraIP
         thumbnails.removeAll()
         details.removeAll()
+        summaries.removeAll()
         unavailable.removeAll()
         queue.removeAll()
         queued.removeAll()
+    }
+
+    /// Drops what is known about files that have gone from the card.
+    ///
+    /// Only these entries are stale: deleting one clip says nothing about any
+    /// other clip's thumbnail. Clearing the whole store instead left every row
+    /// blank, because a row only asks for its preview from `.task` and that
+    /// does not run again for rows that stayed on screen.
+    func forget(_ files: [MediaFile]) {
+        for file in files {
+            thumbnails[file.id] = nil
+            details[file.id] = nil
+            summaries[file.id] = nil
+            unavailable.remove(file.id)
+            queued.remove(file.id)
+        }
+        queue.removeAll { file in files.contains { $0.id == file.id } }
     }
 
     /// Called when an import starts. In-flight work is dropped, not awaited.
@@ -128,7 +148,9 @@ final class PreviewStore: ObservableObject {
     /// filtered out here.
     func request(_ file: MediaFile) {
         guard !isSuspended, !cameraIP.isEmpty else { return }
-        guard thumbnails[file.id] == nil || details[file.id] == nil else { return }
+        guard thumbnails[file.id] == nil || details[file.id] == nil
+                || (MediaPreview.isVideo(file) && summaries[file.id] == nil)
+        else { return }
         guard !queued.contains(file.id), !unavailable.contains(file.id) else { return }
         guard !file.isSidecar else { return }
 
@@ -171,6 +193,21 @@ final class PreviewStore: ObservableObject {
             } else {
                 unavailable.insert(id)
             }
+        }
+
+        // Telemetry last and only for video: it is the heavy one, about 1.3 MB
+        // per minute of footage against 60 KB for a thumbnail, and the point of
+        // it is to answer "is there anything in this clip" before an 11 GB copy.
+        if MediaPreview.isVideo(file), summaries[id] == nil,
+           let data = await Self.get("/gopro/media/telemetry", ip: ip, file: file) {
+            let summary = await Task.detached(priority: .utility) { () -> TelemetrySummary in
+                let scratch = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("gopull-telemetry-\(UUID().uuidString).mp4")
+                defer { try? FileManager.default.removeItem(at: scratch) }
+                guard (try? data.write(to: scratch)) != nil else { return TelemetrySummary() }
+                return TelemetryProbe.summarise(scratch)
+            }.value
+            summaries[id] = summary
         }
         queued.remove(id)
     }

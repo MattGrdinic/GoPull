@@ -16,6 +16,10 @@ struct OverlaySettings: Equatable, Codable {
     var gauge = GaugeConfig()
     var showsMap = true
     var map = MapConfig()
+    var showsGForce = false
+    var gforce = GForceConfig()
+    var showsAcceleration = false
+    var acceleration = AccelerationConfig()
     /// How the overlays get written out, kept with the look rather than beside
     /// it: "my preset" means burned-in-at-4K just as much as it means Hi-Tech.
     /// It is what a batch run over a card uses.
@@ -27,12 +31,15 @@ struct OverlaySettings: Equatable, Codable {
     mutating func apply(_ preset: GaugePreset) {
         gauge.apply(preset)
         map.apply(preset)
+        gforce.apply(preset)
+        acceleration.apply(preset)
     }
 
     /// True when both overlays already agree on a preset, so the picker can
     /// show it as selected rather than guessing.
     var commonPreset: GaugePreset? {
-        gauge.preset == map.preset ? gauge.preset : nil
+        gauge.preset == map.preset && map.preset == gforce.preset
+            && gforce.preset == acceleration.preset ? gauge.preset : nil
     }
 
     static let defaults: OverlaySettings = {
@@ -47,10 +54,11 @@ struct OverlaySettings: Equatable, Codable {
     private static let key = "overlaySettings"
 
     static func load() -> OverlaySettings {
-        guard let data = UserDefaults.standard.data(forKey: key),
-              let decoded = try? JSONDecoder().decode(OverlaySettings.self, from: data)
-        else { return .defaults }
-        return decoded
+        guard let data = UserDefaults.standard.data(forKey: key) else { return .defaults }
+        // Merging, not a plain decode: settings saved before a field existed
+        // would otherwise fail to decode and reset a tuned look without saying
+        // so. See OverlaySettingsCoding.swift.
+        return loadMerging(data)
     }
 
     /// A one-line description of what this preset would produce.
@@ -59,6 +67,8 @@ struct OverlaySettings: Equatable, Codable {
         if let preset = commonPreset { parts.append(preset.label) }
         if showsGauge { parts.append(gauge.kind.label.lowercased()) }
         if showsMap { parts.append("map") }
+        if showsGForce { parts.append("g-force") }
+        if showsAcceleration { parts.append("0-60") }
         parts.append(export.content == .overlayOnly ? "alpha" : "burned in")
         if export.size != .source { parts.append(export.size.label) }
         return parts.joined(separator: " · ")

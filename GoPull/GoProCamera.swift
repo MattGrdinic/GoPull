@@ -154,6 +154,17 @@ actor GoProCamera {
         ((try? await get("/gopro/camera/keep_alive")) != nil)
     }
 
+    /// Deletes one file from the card. Returns false if the camera refused.
+    ///
+    /// There is no undo on the camera side and no trash — the file is gone from
+    /// the card the moment this succeeds.
+    func delete(folder: String, name: String) async -> Bool {
+        let path = "\(folder)/\(name)"
+        guard let encoded = path.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed)
+        else { return false }
+        return (try? await get("/gopro/media/delete/file?path=\(encoded)")) != nil
+    }
+
     @discardableResult
     func enableWiredControl() async -> Bool {
         ((try? await get("/gopro/camera/control/wired_usb?p=1")) != nil)

@@ -193,8 +193,98 @@ region of a row by hand.
 API that must stay untouched during an import, and playback would be a fifth stream. `PreviewStore`
 suspends and `ContentView` disables preview while `importer.isRunning`.
 
+**The exporter composes in one place on purpose.** `composite` used to have two
+`OverlayComposer.draw` calls, and the burn-in one was missing `extremes:` and `runs:`. Both
+have defaults, so it compiled and silently dropped the g-force peak marks and the whole launch
+badge from every burned-in export while the editor preview looked right. Both paths now share
+one call. If you add overlay state, it flows to preview and export together or not at all.
+
+**Time launches on the raw track, and anchor to the rest *before the departure*.** Smoothing is
+a drawing tool: a trailing average delays every threshold crossing by about half its window and
+fills in the dip between two back-to-back launches, so at the default 0.5s the two runs in
+`GX010050` came back as one. Separately, `runs()` used to time from the first stretch of rest it
+found rather than the one the launch actually left — two samples of GPS noise reported a
+3.3-second 0-30 as 10.05s. The accelerometer is smoothed *inside* the detector, by a fixed
+0.1s, so a reported 0-60 doesn't move when the display slider does. Detail in DECISIONS #27.
+
+**Deleting is irreversible and the card has no trash.** The confirmation names the shots and
+splits them into backed (a verified full-size copy in the destination) and unbacked; a shot is
+only backed when every file of it is, so an unimported GPR keeps its JPEG's row in the warning.
+`DeletionPlan` sits outside `AppModel` and takes an `isBacked` closure so it can be tested
+without the singleton. Delete is a context-menu item, the destructive button is not the default
+action, and it is disabled during an import.
+
 **Camera present with no card looks like no camera.** `/gopro/media/list` fails either way.
 `refresh()` disambiguates with `keepAlive()`; don't collapse those branches.
+
+**The camera will hand over telemetry without the clip.** `/gopro/media/telemetry?path=` returns
+the GPMF alone as a small MP4 — about 1.3 MB per minute of footage, 8.6 MB and 0.66s for a
+six-minute clip — so the list can say whether a clip has GPS before an 11 GB copy. It is on the
+control API, so it queues behind thumbnails in `PreviewStore` and stands down during an import
+like everything else there.
+
+**Adding a field to `OverlaySettings` used to reset everyone's saved look.** Swift's synthesised
+`Codable` requires every key, so previously saved settings failed to decode and fell back to the
+defaults with nothing said. `OverlaySettings.load()` merges the stored JSON over the JSON of the
+defaults instead, so a missing key at any depth keeps its default. Nothing needs updating when the
+next overlay is added — but if you hand-write `init(from:)` for one of these types, you take that
+protection away.
+
+**Two filters decide what counts as a launch, and they surprise people.** A run must reach the
+*lowest* target — 30 mph by default, so a clip that never exceeds 25 reports nothing — and must
+average `minimumRate` getting there. A trail ride with eight stops produced zero launches for both
+reasons at once. `AccelerationDetector.diagnose` exists so the UI can say which of the two it was
+rather than "none found".
+
+**A standing start is not just "speed left zero".** Speed hovers around zero and one noisy sample
+above the threshold made an entire clip read as a single 45-second run. Departure has to *hold*,
+and a run that averages under ~1.5 mph/s to its first target is someone pulling away gently, not a
+launch. Both thresholds are in `AccelerationSettings`.
+
+**Time launches from the accelerometer, not the GPS.** GPS speed leaves zero slowly and noisily at
+10 Hz; the 200 Hz accelerometer sees the push immediately. On a real launch that moved the start
+0.22s earlier — 5% of a 4.35s time. Crossings are still GPS, interpolated between the bracketing
+pair, which halves the 100 ms quantisation.
+
+**ACCL includes gravity, and a low pass cannot remove it.** A low pass cannot tell gravity from
+a *sustained* acceleration, and a standing start is exactly that — a one-second average of a
+two-second pull is the pull. A real 0.63 g launch came back as 0.02 g. Gravity comes from the
+camera's `GRAV` stream instead. Its axes are ordered differently from ACCL's: ACCL's first two
+are swapped relative to GRAV's, established by taking the clip-average residual over all nine
+pairings and keeping the one that leaves nothing behind (the vehicle averages no acceleration
+over four minutes). Vehicle mapping: axis 0 vertical, axis 1 lateral, axis 2 longitudinal, the
+latter two negated — longitudinal now correlates r = −0.86 against GPS, against +0.04 before.
+The low pass survives only for clips with no GRAV. Detail in DECISIONS #32.
+
+**The launch-start threshold is relative to the clip's own resting baseline.** The ACCL−GRAV
+residual carries a small per-clip bias (mounting, and GRAV's fusion), so an absolute threshold
+is not the same threshold on every clip: a bike reading +0.04 g standing still tripped a 0.05 g
+test half a second before it moved.
+
+**The g-meter ball moves the way the rider is thrown, not the way the vehicle accelerates.**
+Under power it goes back, under brakes forward, and a left-hander pushes it right — a car's
+g-meter, not a racing G-G plot. The telemetry stays in the vehicle frame (`longitudinal`
+positive under power, `lateral` positive turning right, confirmed at r = +0.93 against
+v·dheading/dt); only `GForceRenderer.offset` negates, and the peak marks negate with it. That
+function is separate from `draw` so the direction is testable without scanning pixels.
+
+**Scale the g-meter from the smoothed track, not the raw one.** A single bump put the raw peak at
+2.82 g against 1.01 g smoothed, and full scale at 4 g left the ball in the middle for a whole ride.
+
+**GPR is a DNG that macOS cannot decode.** ImageIO reports a `.GPR` as
+`com.adobe.raw-image`, reads every DNG tag out of it, and then fails to produce a single pixel or
+a thumbnail — the tile is VC-5 compressed. `GPRConverter` decodes it with GoPro's decoder,
+vendored in `GoPull/VC5/`, and rewrites the same tag set with an uncompressed tile. Adobe's DNG
+SDK (104k lines, also in that repo) is deliberately *not* vendored; the container is rewritten by
+hand instead.
+
+**Two vendored files are renamed on purpose.** `vc5_common/syntax.c` and `vc5_common/wavelet.c`
+became `vc5_common_syntax.c` and `vc5_common_wavelet.c`, because Xcode derives object names from
+the basename and `vc5_decoder` has files of the same name. The directory layout is otherwise kept
+so `#include "syntax.h"` still resolves to the right header.
+
+**`vc5_decoder_parameters_set_default` does not set the allocator.** `mem_alloc` and `mem_free`
+are left as whatever was on the stack, so the decoder segfaults on its first allocation. Set them.
 
 **Camera must be in "GoPro Connect" USB mode**, not MTP, or nothing is discoverable.
 

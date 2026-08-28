@@ -22,7 +22,10 @@ enum OverlayComposer {
     static func draw(in context: CGContext, frameSize: CGSize,
                      track: TelemetryTrack, at time: Double,
                      settings: OverlaySettings, maxSpeed: Double,
-                     projection: RouteProjection? = nil) {
+                     projection: RouteProjection? = nil,
+                     gforce: GForceTrack? = nil, maxG: Double = 1,
+                     peaks: GForceTrack.RunningExtremes = .init(),
+                     runs: [AccelerationRun] = []) {
 
         let sample = track.sample(at: time)
 
@@ -33,6 +36,27 @@ enum OverlayComposer {
                                    in: context, frameSize: frameSize,
                                    config: settings.gauge, maxSpeed: maxSpeed)
             }
+        }
+
+        if settings.showsGForce, let gforce, !gforce.isEmpty {
+            GForceRenderer.draw(gforce.sample(at: time),
+                                trail: trail(in: gforce, at: time,
+                                             seconds: settings.gforce.trailSeconds),
+                                in: context, frameSize: frameSize,
+                                config: settings.gforce, maxG: maxG,
+                                // What had been reached by now, not the whole clip.
+                                extremes: peaks.at(time))
+        }
+
+        if settings.showsAcceleration, !runs.isEmpty {
+            let current = runs.run(at: time, hold: settings.acceleration.holdSeconds,
+                                   lead: settings.acceleration.countdownLead)
+            let best = current.flatMap { run -> AccelerationRun? in
+                guard let first = run.reached.first else { return nil }
+                return runs.filter { $0.start < run.start }.best(to: first)
+            }
+            AccelerationRenderer.draw(current, best: best, at: time, in: context,
+                                      frameSize: frameSize, config: settings.acceleration)
         }
 
         if settings.showsMap {
@@ -64,8 +88,34 @@ enum OverlayComposer {
         return Double(low) + fraction
     }
 
+    /// The last `seconds` of readings, thinned to something a path can hold.
+    ///
+    /// The accelerometer runs at 200 Hz, so a second of trail is 200 points for
+    /// a circle a couple of hundred pixels across. Every fourth is plenty and
+    /// keeps this affordable per frame.
+    static func trail(in track: GForceTrack, at time: Double, seconds: Double) -> [GForceSample] {
+        guard seconds > 0, !track.isEmpty else { return [] }
+        let from = time - seconds
+        var result: [GForceSample] = []
+        var index = 0
+        for sample in track.samples where sample.time >= from && sample.time <= time {
+            if index % 4 == 0 { result.append(sample) }
+            index += 1
+        }
+        return result
+    }
+
     /// The dial's top, chosen once from the clip so the needle has headroom.
     static func maxSpeed(for track: TelemetryTrack, unit: SpeedUnit) -> Double {
         GaugeConfig.niceMaximum(above: unit.value(fromMetresPerSecond: track.topSpeed))
+    }
+
+    /// Full scale for the meter, from what the clip actually pulled.
+    ///
+    /// Pass the *smoothed* track, which is what the meter draws. Scaling from
+    /// the raw signal puts full scale at 4 g on the strength of one bump, and
+    /// the ball then barely leaves the middle for the whole ride.
+    static func maxG(for track: GForceTrack, config: GForceConfig) -> Double {
+        config.maxG ?? GForceConfig.niceMaximum(above: track.peakPlanar)
     }
 }

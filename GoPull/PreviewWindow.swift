@@ -165,9 +165,12 @@ private struct PlayerView: NSViewRepresentable {
 /// The thumbnail shown against a clip in the list.
 struct ClipThumbnail: View {
     let file: MediaFile
+    /// Height in points; the width follows 16:9. Adjustable, because a card of
+    /// stills is far easier to pick through at a larger size.
+    var height: Double = 36
     @EnvironmentObject private var model: AppModel
 
-    private static let size = CGSize(width: 64, height: 36)
+    private var size: CGSize { CGSize(width: height * 16 / 9, height: height) }
 
     var body: some View {
         ZStack {
@@ -181,18 +184,18 @@ struct ClipThumbnail: View {
                 // Says "this plays" without needing to be discovered.
                 if MediaPreview.isVideo(file), !file.isSidecar {
                     Image(systemName: "play.circle.fill")
-                        .font(.system(size: 17))
+                        .font(.system(size: max(height * 0.47, 11)))
                         .foregroundStyle(.white.opacity(0.9), .black.opacity(0.35))
                         .shadow(radius: 1)
                 }
             } else {
                 Image(systemName: file.isSidecar ? "square.stack.3d.down.right"
                                                  : (MediaPreview.isStill(file) ? "photo" : "film"))
-                    .font(.caption)
+                    .font(.system(size: max(height * 0.3, 9)))
                     .foregroundStyle(.tertiary)
             }
         }
-        .frame(width: Self.size.width, height: Self.size.height)
+        .frame(width: size.width, height: size.height)
         .clipShape(RoundedRectangle(cornerRadius: 3))
         .task(id: file.id) { model.previews.request(file) }
     }

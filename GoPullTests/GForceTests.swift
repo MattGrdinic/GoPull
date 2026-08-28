@@ -238,3 +238,58 @@ struct OverlayFitsTests {
         #expect(abs(rect.midX - hd.width / 2) < 0.5)
     }
 }
+
+/// A peak is something that happened, so it appears when it happens and then
+/// stays until it is beaten -- rather than the whole clip's biggest hit being
+/// shown from the first frame.
+struct RunningPeakTests {
+
+    /// A small hit at 1s, a bigger one at 3s, quiet either side.
+    private func climbing() -> GForceTrack {
+        var track = GForceTrack()
+        for i in 0..<1000 {
+            let t = Double(i) / 100
+            let lateral: Double
+            switch t {
+            case 1.0..<1.2:  lateral = 0.3
+            case 3.0..<3.2:  lateral = 0.9
+            default:         lateral = 0.02
+            }
+            track.samples.append(GForceSample(time: t, lateral: lateral,
+                                              longitudinal: 0, vertical: 0))
+        }
+        return track
+    }
+
+    @Test func peaksAppearWhenTheyHappen() {
+        let running = climbing().runningExtremes
+        #expect(running.at(0.5).right < 0.1)
+        #expect(abs(running.at(2.0).right - 0.3) < 0.01)
+        #expect(abs(running.at(5.0).right - 0.9) < 0.01)
+    }
+
+    @Test func aPeakStaysUntilItIsBeaten() {
+        let running = climbing().runningExtremes
+        #expect(running.at(2.0).right == running.at(2.9).right)
+        #expect(running.at(5.0).right > running.at(2.9).right)
+        #expect(running.at(5.0).right == running.at(9.9).right)
+    }
+
+    @Test func runningPeaksNeverFallAndEndAtTheWholeClip() {
+        let track = climbing()
+        let running = track.runningExtremes
+        var previous = GForceTrack.Extremes()
+        for step in 0...200 {
+            let now = running.at(Double(step) / 20)
+            #expect(now.right >= previous.right)
+            #expect(now.left >= previous.left)
+            previous = now
+        }
+        #expect(running.final == track.extremes)
+    }
+
+    @Test func nothingIsClaimedBeforeTheTrackStarts() {
+        #expect(climbing().runningExtremes.at(-1).isEmpty)
+        #expect(GForceTrack().runningExtremes.at(5).isEmpty)
+    }
+}

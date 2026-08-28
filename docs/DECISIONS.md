@@ -592,3 +592,40 @@ so unreached targets now show a dash.
 Verified by exporting GX010050 and sampling frames: at 12.0s the panel reads
 LAUNCH 4.83s / 0-30 mph 3.35s / 0-60 mph —, and the g-meter carries its red ticks
 and peak figures.
+
+
+## 30. G-force peaks are what has happened, not what will
+
+The peak marks were the whole clip's extremes, computed once and drawn on every
+frame. That is a spoiler and it is also not a peak: a mark sitting at 1.14 g from
+the first frame gives away a corner a minute away, and never moves, so it reads as
+decoration rather than a record.
+
+`GForceTrack.RunningExtremes` is a prefix maximum over the track: `at(time)` gives
+what had been reached by then, so a mark appears at the moment it is set and holds
+until it is beaten. Bucketed at 20 Hz, because the values only ever climb and a
+bucket therefore costs at most 50 ms of freshness -- under two frames. Per sample
+instead, a ten-minute clip at 200 Hz would carry 120,000 entries; at 20 Hz it is
+12,000. Lookup is a binary search, so the per-frame cost is a handful of compares.
+
+The meter's *scale* stays whole-clip. A full scale that grew during playback would
+move the ball without the bike doing anything.
+
+Verified on GX010050: the four figures climb through the clip, never fall, and end
+exactly equal to `extremes` for the whole track.
+
+## 31. The launch badge can count in
+
+`showsCountdown` brings the panel up for `countdownSeconds` before a detected run
+and shows the time remaining, red for the last second.
+
+It earns its place twice. For a viewer it says a run is coming, which a badge that
+appears at the same instant as the launch cannot. For us it makes the detected
+start *observable*: the count reaching zero while the bike is still stationary is
+exactly the smoothing-and-latency error that #27 was about, and now it can be seen
+in the footage and measured rather than inferred from numbers in a panel. That is
+why the countdown shows tenths rather than whole seconds.
+
+`run(at:hold:lead:)` carries the window; the renderer draws the count-in state when
+`elapsed` is negative and returns before the target rows, so a run's splits never
+appear before it starts.

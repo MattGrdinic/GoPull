@@ -338,3 +338,53 @@ struct GForcePeakOptionTests {
         #expect(!restored.gforce.showsPeakFigures)
     }
 }
+
+/// Counting in to a launch, so the start is visible rather than inferred.
+struct LaunchCountdownTests {
+
+    @Test func theCountdownBringsTheBadgeUpBeforeTheRun() {
+        var run = AccelerationRun(start: 10); run.end = 18
+        let runs = [run]
+        #expect(runs.run(at: 7) == nil)              // off: nothing before the start
+        #expect(runs.run(at: 7, lead: 5)?.start == 10)
+        #expect(runs.run(at: 5.1, lead: 5)?.start == 10)
+        #expect(runs.run(at: 4.5, lead: 5) == nil)   // and no earlier than that
+    }
+
+    @Test func theCountdownLeadFollowsItsToggle() {
+        var config = AccelerationConfig()
+        #expect(config.countdownLead == 0)           // off by default
+        config.showsCountdown = true
+        #expect(config.countdownLead == 5)
+        config.countdownSeconds = 3
+        #expect(config.countdownLead == 3)
+        // A negative setting must not push the badge past the run.
+        config.countdownSeconds = -2
+        #expect(config.countdownLead == 0)
+    }
+
+    @Test func countdownSettingsSurviveEncoding() throws {
+        var settings = OverlaySettings.defaults
+        settings.acceleration.showsCountdown = true
+        settings.acceleration.countdownSeconds = 7
+        let data = try JSONEncoder().encode(settings)
+        #expect(try JSONDecoder().decode(OverlaySettings.self, from: data) == settings)
+    }
+
+    /// Adding these keys must not reset a look someone already saved.
+    @Test func settingsSavedBeforeTheCountdownStillLoad() throws {
+        var older = OverlaySettings.defaults
+        older.showsAcceleration = true
+        var json = try JSONSerialization.jsonObject(
+            with: try JSONEncoder().encode(older)) as! [String: Any]
+        var acceleration = json["acceleration"] as! [String: Any]
+        acceleration["showsCountdown"] = nil
+        acceleration["countdownSeconds"] = nil
+        json["acceleration"] = acceleration
+        let stripped = try JSONSerialization.data(withJSONObject: json)
+
+        let loaded = OverlaySettings.loadMerging(stripped)
+        #expect(loaded.showsAcceleration)                       // kept what was saved
+        #expect(loaded.acceleration.countdownSeconds == 5)      // defaulted the rest
+    }
+}

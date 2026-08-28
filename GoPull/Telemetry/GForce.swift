@@ -81,6 +81,63 @@ struct GForceTrack {
         return result
     }
 
+    /// The extremes as they stood at each moment, rather than for the whole clip.
+    ///
+    /// A peak is something that happened, so it should appear when it happens
+    /// and then stay put until it is beaten. Showing the clip's biggest hit from
+    /// the first frame gives away a corner that is still a minute away, and made
+    /// the marks look like fixed decoration rather than a record.
+    ///
+    /// Bucketed at 20 Hz: the values only ever climb, so a bucket costs at most
+    /// 50 ms of freshness, which is under two frames and invisible. Per sample
+    /// instead, a ten-minute clip at 200 Hz would hold 120,000 of these.
+    struct RunningExtremes {
+        private var times: [Double] = []
+        private var values: [Extremes] = []
+
+        /// The whole clip, for anything that wants the final figures.
+        var final: Extremes { values.last ?? Extremes() }
+        var isEmpty: Bool { values.isEmpty }
+
+        init() {}
+
+        init(_ track: GForceTrack, bucket: Double = 0.05) {
+            var running = Extremes()
+            var nextBucket = -Double.infinity
+            for sample in track.samples {
+                if sample.lateral > 0 { running.right = Swift.max(running.right, sample.lateral) }
+                else { running.left = Swift.max(running.left, -sample.lateral) }
+                if sample.longitudinal > 0 {
+                    running.accelerating = Swift.max(running.accelerating, sample.longitudinal)
+                } else {
+                    running.braking = Swift.max(running.braking, -sample.longitudinal)
+                }
+                running.vertical = Swift.max(running.vertical, abs(sample.vertical))
+
+                if sample.time >= nextBucket {
+                    times.append(sample.time)
+                    values.append(running)
+                    nextBucket = sample.time + bucket
+                } else {
+                    values[values.count - 1] = running
+                }
+            }
+        }
+
+        /// What had been reached by `time`. Nothing, before the track starts.
+        func at(_ time: Double) -> Extremes {
+            guard let first = times.first, time >= first else { return Extremes() }
+            var low = 0, high = times.count - 1
+            while low + 1 < high {
+                let mid = (low + high) / 2
+                if times[mid] <= time { low = mid } else { high = mid }
+            }
+            return times[high] <= time ? values[high] : values[low]
+        }
+    }
+
+    var runningExtremes: RunningExtremes { RunningExtremes(self) }
+
     /// The reading at a moment, interpolated so the ball moves smoothly.
     func sample(at time: Double) -> GForceSample? {
         guard samples.count > 1,

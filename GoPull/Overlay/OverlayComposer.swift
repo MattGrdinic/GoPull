@@ -24,7 +24,7 @@ enum OverlayComposer {
                      settings: OverlaySettings, maxSpeed: Double,
                      projection: RouteProjection? = nil,
                      gforce: GForceTrack? = nil, maxG: Double = 1,
-                     extremes: GForceTrack.Extremes = .init(),
+                     peaks: GForceTrack.RunningExtremes = .init(),
                      runs: [AccelerationRun] = []) {
 
         let sample = track.sample(at: time)
@@ -43,11 +43,14 @@ enum OverlayComposer {
                                 trail: trail(in: gforce, at: time,
                                              seconds: settings.gforce.trailSeconds),
                                 in: context, frameSize: frameSize,
-                                config: settings.gforce, maxG: maxG, extremes: extremes)
+                                config: settings.gforce, maxG: maxG,
+                                // What had been reached by now, not the whole clip.
+                                extremes: peaks.at(time))
         }
 
         if settings.showsAcceleration, !runs.isEmpty {
-            let current = runs.run(at: time, hold: settings.acceleration.holdSeconds)
+            let current = runs.run(at: time, hold: settings.acceleration.holdSeconds,
+                                   lead: settings.acceleration.countdownLead)
             let best = current.flatMap { run -> AccelerationRun? in
                 guard let first = run.reached.first else { return nil }
                 return runs.filter { $0.start < run.start }.best(to: first)

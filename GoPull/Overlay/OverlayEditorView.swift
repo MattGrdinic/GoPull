@@ -236,6 +236,13 @@ struct OverlayEditorView: View {
                                    in: 0.12...0.40)
                             Toggle("Compare with the best run",
                                    isOn: $model.settings.acceleration.comparesToBest)
+                            Toggle("Count in to the launch",
+                                   isOn: $model.settings.acceleration.showsCountdown)
+                            if model.settings.acceleration.showsCountdown {
+                                slider("Count from",
+                                       value: $model.settings.acceleration.countdownSeconds,
+                                       in: 2...10, format: "%.0f s")
+                            }
                         }
                     }
                 }

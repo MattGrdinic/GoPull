@@ -80,6 +80,16 @@ struct AccelerationConfig: Equatable, Codable {
     var detection = AccelerationSettings()
     /// How long the result stays up after a run finishes.
     var holdSeconds: Double = 6
+    /// Count in to the launch, so the start is visible rather than inferred.
+    ///
+    /// Worth having for its own sake -- it tells the viewer a run is coming --
+    /// but it also makes the detected start observable: if the count reaches
+    /// zero before the bike moves, the start is early, and by how much.
+    var showsCountdown: Bool = false
+    var countdownSeconds: Double = 5
+
+    /// Seconds of badge before the run, or none when the countdown is off.
+    var countdownLead: Double { showsCountdown ? Swift.max(countdownSeconds, 0) : 0 }
     /// Compare against the best earlier run in the clip.
     var comparesToBest: Bool = true
 
@@ -134,9 +144,27 @@ enum AccelerationRenderer {
         context.setShadow(offset: .zero, blur: 0, color: nil)
 
         let rows = config.detection.targets.sorted()
+        let band = rect.height * 0.34 / (0.34 + Double(rows.count) * 0.30)
         let rowHeight = rect.height * 0.30 / (0.34 + Double(rows.count) * 0.30)
-        let titleY = rect.maxY - rect.height * 0.34 / (0.34 + Double(rows.count) * 0.30) * 0.55
+        let titleY = rect.maxY - band * 0.55
         let elapsed = time - run.start
+
+        // Counting in. The panel is up before the run so the start is visible
+        // rather than inferred -- and if the count hits zero before anything
+        // moves, that is the detected start being early, by a readable amount.
+        if elapsed < 0 {
+            text("LAUNCH IN", at: CGPoint(x: rect.midX, y: titleY),
+                 size: rect.width * 0.085, font: style.captionFont,
+                 color: style.label, align: .centre, in: context)
+            let remaining = -elapsed
+            text(String(format: "%.1f", remaining),
+                 at: CGPoint(x: rect.midX, y: rect.minY + (rect.height - band) * 0.5),
+                 size: (rect.height - band) * 0.52, font: style.numberFont,
+                 // Red for the last second, the way a start light goes.
+                 color: remaining <= 1 ? style.slower : style.value,
+                 align: .centre, in: context)
+            return
+        }
 
         let reachedSoFar = rows.filter { (run.splits[$0] ?? .infinity) <= elapsed }.count
         text(reachedSoFar < rows.count

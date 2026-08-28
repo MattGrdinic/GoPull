@@ -204,7 +204,7 @@ final class OverlayExporter: ObservableObject {
         // Built once for the whole export rather than per frame.
         let projection = RouteProjection(track.usable.map(\.coordinate))
         let maxG = OverlayComposer.maxG(for: gforce, config: settings.gforce)
-        let extremes = gforce.extremes
+        let peaks = gforce.runningExtremes
 
         // Always write somewhere hidden and move it into place at the end,
         // whether or not the original is being replaced.
@@ -344,7 +344,7 @@ final class OverlayExporter: ObservableObject {
                                  at: time.seconds, settings: settings,
                                  maxSpeed: maxSpeed, projection: projection,
                                  gforce: gforce, maxG: maxG,
-                                 extremes: extremes, runs: runs)
+                                 peaks: peaks, runs: runs)
 
                     if !adaptor.append(target, withPresentationTime: time) {
                         continuation.resume(throwing: ExportError.cannotWrite(
@@ -427,7 +427,7 @@ final class OverlayExporter: ObservableObject {
                                             settings: OverlaySettings, maxSpeed: Double,
                                             projection: RouteProjection,
                                             gforce: GForceTrack, maxG: Double,
-                                            extremes: GForceTrack.Extremes,
+                                            peaks: GForceTrack.RunningExtremes,
                                             runs: [AccelerationRun]) {
         CVPixelBufferLockBaseAddress(target, [])
         defer { CVPixelBufferUnlockBaseAddress(target, []) }
@@ -464,7 +464,7 @@ final class OverlayExporter: ObservableObject {
         OverlayComposer.draw(in: context, frameSize: size, track: track, at: time,
                              settings: settings, maxSpeed: maxSpeed,
                              projection: projection, gforce: gforce, maxG: maxG,
-                             extremes: extremes, runs: runs)
+                             peaks: peaks, runs: runs)
     }
 
     /// Puts the source frame into the target buffer, scaling if the export is

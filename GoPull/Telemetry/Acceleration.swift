@@ -293,8 +293,9 @@ extension Array where Element == AccelerationRun {
     ///
     /// `hold` keeps the result up for a few seconds after the run ends, so the
     /// final time can be read rather than blinking away at the finish.
-    func run(at time: Double, hold: Double = 3) -> AccelerationRun? {
+    /// `lead` brings it up before the run starts, for a count-in.
+    func run(at time: Double, hold: Double = 3, lead: Double = 0) -> AccelerationRun? {
         // `max` inside an Array extension resolves to the sequence method.
-        last { time >= $0.start && time <= Swift.max($0.end, $0.start) + hold }
+        last { time >= $0.start - lead && time <= Swift.max($0.end, $0.start) + hold }
     }
 }

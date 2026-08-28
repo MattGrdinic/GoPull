@@ -53,6 +53,7 @@ final class OverlayEditorModel: ObservableObject {
     private var maxSpeed: Double = 60
     private var maxG: Double = 1
     private var extremes = GForceTrack.Extremes()
+    private var peaks = GForceTrack.RunningExtremes()
     private var frame: CGImage?
     private var generator: AVAssetImageGenerator?
     private var frameTask: Task<Void, Never>?
@@ -110,6 +111,7 @@ final class OverlayEditorModel: ObservableObject {
         maxSpeed = OverlayComposer.maxSpeed(for: raw, unit: settings.gauge.unit)
         gforce = rawGForce.smoothed(settings.gforce.smoothing)
         extremes = gforce.extremes
+        peaks = gforce.runningExtremes
         // Timed on the *raw* track. A trailing average is a drawing tool: it
         // delays every threshold crossing by about half its window, and it
         // fills in the dip between two back-to-back launches well enough that
@@ -203,7 +205,7 @@ final class OverlayEditorModel: ObservableObject {
         OverlayComposer.draw(in: context, frameSize: size, track: track, at: time,
                              settings: settings, maxSpeed: maxSpeed,
                              gforce: gforce, maxG: maxG,
-                             extremes: extremes, runs: runs)
+                             peaks: peaks, runs: runs)
         preview = context.makeImage()
     }
 

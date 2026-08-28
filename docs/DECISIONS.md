@@ -629,3 +629,52 @@ why the countdown shows tenths rather than whole seconds.
 `run(at:hold:lead:)` carries the window; the renderer draws the count-in state when
 `elapsed` is negative and returns before the target rows, so a run's splits never
 appear before it starts.
+
+
+## 32. Gravity comes from GRAV, not from a low pass
+
+The g-meter read 0.03 g during a 2.2-second 0-30 that really pulled 0.6 g.
+
+Gravity was estimated by low-passing ACCL over one second and subtracting it.
+That cannot work, and not because the window was wrong: a low pass cannot tell
+gravity from a sustained acceleration, and a standing start is precisely a
+sustained acceleration. A one-second average of a two-second pull *is* the pull.
+Measured on GX010053, the fraction of a real 0.63 g that survived was 4% at a
+one-second window, 27% at five seconds, 40% at twenty. There is no window that
+fixes it.
+
+The camera ships `GRAV`, a gravity unit vector at 30 Hz, which is the right
+input. Its axes are ordered differently from ACCL's, which is what the old note
+about the two streams disagreeing was seeing. The pairing was established by
+taking the clip-average residual for all nine combinations: the bike averages no
+acceleration over four minutes, so the correct pairing is the one that leaves
+nothing behind.
+
+|         | GRAV0  | GRAV1  | GRAV2  |
+|---------|--------|--------|--------|
+| ACCL0   | +1.044 | **+0.034** | +0.952 |
+| ACCL1   | **+0.022** | -0.988 | -0.071 |
+| ACCL2   | +0.104 | -0.906 | **+0.011** |
+
+ACCL's first two axes are swapped relative to GRAV's; nothing is sign-flipped.
+The vehicle mapping is unchanged and is confirmed by this: longitudinal is
+axis 2 negated, and against GPS it now correlates at r = -0.86 over the whole
+clip, against +0.04 before.
+
+Across six launches in GX010053 the reported mean is 89% of what GPS says the
+run required (77-95%), and the clip the report came from reads 0.57 g against a
+true 0.60. Gentler launches read lower — GX010050's two four-second pulls come
+back at 63% — which is expected: GRAV is itself a fused estimate and drifts into
+a long, gentle acceleration, and the GPS figure averages the whole 0-30
+including the roll-out. The low-pass path is kept for clips with no GRAV stream,
+with the window widened to ten seconds as the least-bad option.
+
+One consequence worth knowing: this changes launch *timing* too, because the
+start refinement reads the longitudinal channel, which used to be near zero.
+The threshold is now measured against the clip's own resting baseline. The
+residual carries a small per-clip bias -- how the camera sits, plus GRAV's
+fusion -- so an absolute 0.05 g is not the same threshold on every clip: on
+GX010053 the bike reads +0.04 g standing still, and the absolute threshold
+tripped on that at 211.58s when the push does not begin until 212.0s. Against
+the baseline it lands at 211.99s, and the run reads 2.28s where the rider
+counted 2.2.

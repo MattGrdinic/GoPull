@@ -246,13 +246,20 @@ launch. Both thresholds are in `AccelerationSettings`.
 0.22s earlier — 5% of a 4.35s time. Crossings are still GPS, interpolated between the bracketing
 pair, which halves the 100 ms quantisation.
 
-**ACCL includes gravity, and its axes are not what ORIN says.** A still camera reads 1 g, so
-gravity is estimated by low-passing the signal and subtracted — which also makes it independent of
-how the camera is mounted. The stream's `ORIN` is `ZXY` while the gravity stream carries none, and
-their dominant axes disagree, so neither is trusted. The mapping was established from a real ride
-instead: axis 0 is vertical (9.76 m/s² average), axis 1 is lateral (r = −0.542 against
-v·dHeading/dt) and axis 2 is longitudinal (r = −0.431 against GPS d(speed)/dt), all sign-flipped.
-Re-derive it the same way before assuming it holds for a different mount.
+**ACCL includes gravity, and a low pass cannot remove it.** A low pass cannot tell gravity from
+a *sustained* acceleration, and a standing start is exactly that — a one-second average of a
+two-second pull is the pull. A real 0.63 g launch came back as 0.02 g. Gravity comes from the
+camera's `GRAV` stream instead. Its axes are ordered differently from ACCL's: ACCL's first two
+are swapped relative to GRAV's, established by taking the clip-average residual over all nine
+pairings and keeping the one that leaves nothing behind (the vehicle averages no acceleration
+over four minutes). Vehicle mapping: axis 0 vertical, axis 1 lateral, axis 2 longitudinal, the
+latter two negated — longitudinal now correlates r = −0.86 against GPS, against +0.04 before.
+The low pass survives only for clips with no GRAV. Detail in DECISIONS #32.
+
+**The launch-start threshold is relative to the clip's own resting baseline.** The ACCL−GRAV
+residual carries a small per-clip bias (mounting, and GRAV's fusion), so an absolute threshold
+is not the same threshold on every clip: a bike reading +0.04 g standing still tripped a 0.05 g
+test half a second before it moved.
 
 **Scale the g-meter from the smoothed track, not the raw one.** A single bump put the raw peak at
 2.82 g against 1.01 g smoothed, and full scale at 4 g left the ball in the middle for a whole ride.

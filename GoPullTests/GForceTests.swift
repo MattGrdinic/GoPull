@@ -293,3 +293,57 @@ struct RunningPeakTests {
         #expect(GForceTrack().runningExtremes.at(5).isEmpty)
     }
 }
+
+/// Gravity removal. Low-passing ACCL cannot tell gravity from a sustained
+/// acceleration, and a launch is exactly that — so the camera's own GRAV
+/// stream is used where the clip has one.
+struct GravityRemovalTests {
+
+    /// Stationary, then a steady 0.6 g forward pull for two seconds.
+    /// Gravity sits on ACCL x; GRAV reports it on *its* y, axes swapped.
+    private func launch() -> (accl: [(time: Double, x: Double, y: Double, z: Double)],
+                              grav: [(time: Double, x: Double, y: Double, z: Double)]) {
+        var accl: [(time: Double, x: Double, y: Double, z: Double)] = []
+        var grav: [(time: Double, x: Double, y: Double, z: Double)] = []
+        let g = 9.80665
+        for i in 0..<2000 {
+            let t = Double(i) / 200
+            // Longitudinal is -z, so a forward pull is negative z.
+            let pull = (t >= 2 && t < 4) ? -0.6 * g : 0
+            accl.append((t, g, 0, pull))
+            if i % 7 == 0 { grav.append((t, 0, 1, 0)) }   // 30 Hz-ish, swapped
+        }
+        return (accl, grav)
+    }
+
+    @Test func gravityFromTheGravStreamKeepsASustainedPull() {
+        let (accl, grav) = launch()
+        let track = GForceReader.track(from: accl, gravity: grav)
+        let during = track.sample(at: 3.0)
+        #expect(abs((during?.longitudinal ?? 0) - 0.6) < 0.02)
+        // And nothing before it starts.
+        #expect(abs(track.sample(at: 1.0)?.longitudinal ?? 1) < 0.02)
+        // Gravity is gone from the vertical channel, not left sitting at 1 g.
+        #expect(abs(track.sample(at: 1.0)?.vertical ?? 1) < 0.02)
+    }
+
+    /// The failure this replaces: a one-second average of a two-second pull is
+    /// the pull, so almost none of it survives.
+    @Test func lowPassingEatsASustainedPull() {
+        let (accl, _) = launch()
+        let short = GForceReader.track(from: accl, window: 1.0).sample(at: 3.0)?.longitudinal ?? 0
+        let long = GForceReader.track(from: accl, window: 10.0).sample(at: 3.0)?.longitudinal ?? 0
+        #expect(short < 0.2)            // most of a real 0.6 g lost
+        #expect(long > short)           // a longer window keeps more of it
+        // Neither is as good as GRAV, which is why GRAV is preferred.
+        let exact = GForceReader.track(from: accl, gravity: launch().grav)
+            .sample(at: 3.0)?.longitudinal ?? 0
+        #expect(exact > long)
+    }
+
+    @Test func aClipWithNoGravStreamStillReads() {
+        let (accl, _) = launch()
+        #expect(!GForceReader.track(from: accl, window: 10.0).isEmpty)
+        #expect(GForceReader.track(from: accl, gravity: []).isEmpty)
+    }
+}

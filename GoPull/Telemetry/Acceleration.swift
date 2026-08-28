@@ -273,10 +273,24 @@ enum AccelerationDetector {
                                      in gforce: GForceTrack) -> Double {
         let window = gforce.samples.filter { $0.time >= restEnd - 1.0 && $0.time <= departure }
         guard !window.isEmpty else { return restEnd }
+
+        // Measure the rest, and look for a rise above *it*.
+        //
+        // The residual carries a small per-clip bias -- how the camera sits, and
+        // GRAV's own fusion -- so a fixed threshold is not the same threshold on
+        // every clip. On GX010053 the bike reads +0.04 g standing still, and an
+        // absolute 0.05 g tripped on that at 211.58s when the push does not
+        // begin until 212.0s, adding half a second to a 2.2-second run.
+        let resting = window.filter { $0.time <= restEnd }
+        let baseline = resting.isEmpty ? 0
+            : resting.reduce(0) { $0 + $1.longitudinal } / Double(resting.count)
+        let pushing = baseline + 0.10
+        let holding = baseline + 0.04
+
         // The first sustained forward push, rather than one noisy sample.
-        for (offset, sample) in window.enumerated() where sample.longitudinal > 0.05 {
+        for (offset, sample) in window.enumerated() where sample.longitudinal > pushing {
             let ahead = window[offset..<min(offset + 20, window.count)]
-            if ahead.allSatisfy({ $0.longitudinal > 0.02 }) { return sample.time }
+            if ahead.allSatisfy({ $0.longitudinal > holding }) { return sample.time }
         }
         return restEnd
     }

@@ -207,6 +207,12 @@ found rather than the one the launch actually left — two samples of GPS noise 
 3.3-second 0-30 as 10.05s. The accelerometer is smoothed *inside* the detector, by a fixed
 0.1s, so a reported 0-60 doesn't move when the display slider does. Detail in DECISIONS #27.
 
+**Delete-after-import offers whole verified shots only, and always asks.** It is skipped
+entirely unless the import ran clean (no failures, not cancelled), every file is re-checked on
+disk at full size rather than trusted from "no failure reported", and a shot whose raw stayed
+behind is never offered. The result is all-backed by construction, so the prompt is a plain
+alert; `deletionFollowsImport` is what picks it over the sheet below.
+
 **Deleting is irreversible and the card has no trash.** The confirmation names the shots and
 splits them into backed (a verified full-size copy in the destination) and unbacked; a shot is
 only backed when every file of it is, so an unimported GPR keeps its JPEG's row in the warning.

@@ -46,4 +46,22 @@ struct DeletionPlan {
             }
         }
     }
+
+    /// What an import may offer to delete once it has finished.
+    ///
+    /// Whole shots that the import touched, narrowed to the ones every file of
+    /// which is verified on this Mac. The importer reporting no failure is not
+    /// the same as the bytes being on disk, and a shot whose raw was left behind
+    /// by the RAW toggle must not be offered at all -- deleting it would take
+    /// the raw with it. The result is all-backed by construction, which is what
+    /// lets the post-import prompt be a plain confirmation instead of the sheet.
+    static func afterImport(_ imported: [MediaFile], among rows: [MediaRow],
+                            isBacked: (MediaFile) -> Bool) -> DeletionPlan {
+        let justImported = Set(imported.map(\.id))
+        let touched = rows.filter { row in
+            row.files(includingRaw: true).contains { justImported.contains($0.id) }
+        }
+        let considered = DeletionPlan(rows: touched, isBacked: isBacked)
+        return DeletionPlan(rows: considered.backed, isBacked: isBacked)
+    }
 }

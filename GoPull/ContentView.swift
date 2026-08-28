@@ -257,7 +257,21 @@ struct ContentView: View {
                                  details: model.previews.details[file.id])
             }
         }
-        .sheet(isPresented: Binding(get: { model.pendingDeletion != nil },
+        .alert("Delete \(model.pendingDeletion?.rows.count ?? 0) item(s) from the camera?",
+               isPresented: Binding(get: { model.pendingDeletion != nil
+                                           && model.deletionFollowsImport },
+                                    set: { if !$0 { model.cancelDeletion() } })) {
+            Button("Keep on Camera", role: .cancel) { model.cancelDeletion() }
+            Button("Delete", role: .destructive) { model.confirmDeletion() }
+        } message: {
+            if let plan = model.pendingDeletion {
+                Text("\(plan.bytes.byteLabel) copied to "
+                     + "\(model.destination.lastPathComponent) and verified at full size. "
+                     + "The camera has no trash — this cannot be undone.")
+            }
+        }
+        .sheet(isPresented: Binding(get: { model.pendingDeletion != nil
+                                           && !model.deletionFollowsImport },
                                     set: { if !$0 { model.cancelDeletion() } })) {
             if let plan = model.pendingDeletion {
                 DeleteConfirmationView(plan: plan, destination: model.destination,
@@ -580,6 +594,11 @@ struct ContentView: View {
             Toggle("Overlays after import", isOn: $model.overlaysAfterImport)
             if model.overlaysAfterImport {
                 Text("\(model.overlayEligibleCount) ticked · \(model.overlayPresetSummary)")
+            }
+            Divider()
+            Toggle("Delete from camera after importing", isOn: $model.deleteAfterImport)
+            if model.deleteAfterImport {
+                Text("Asks first, every time")
             }
         } label: {
             Label("Options", systemImage: "gearshape")

@@ -743,3 +743,28 @@ produce diagnostic for expression" rather than saying so. And in the tests,
 `#expect(offset == -7 * 3600)` against a `TimeInterval?` fails — the bare literal
 expression does not infer to Double there — so the expectation is a typed
 constant.
+
+
+## 35. Delete-after-import offers, it does not act
+
+The option is off unless asked for and remembered once set, and when set it still
+asks every time. The confirmation is not skippable and there is no "don't ask
+again": the card has no trash, and an import that reported success is the only
+thing standing between the footage and nothing.
+
+What it offers is narrowed three ways, in `DeletionPlan.afterImport`:
+
+* **Only a clean run.** A cancelled or partly failed import is exactly when the
+  copy on this Mac is least worth trusting, so nothing is offered at all.
+* **Only what is verified on disk.** The importer reporting no failure is not the
+  same as the bytes being there, so every file is re-checked at full size — the
+  same test `importedURL` makes. Confirmed against the camera: a real still is
+  offered, the same still one kilobyte short is not.
+* **Only whole shots.** A shot whose raw was left behind by the RAW toggle is
+  never offered, because deleting it would take the raw with it.
+
+Because the result is all-backed by construction, the prompt is a plain alert
+rather than the sheet from #28 — that sheet exists to separate backed shots from
+unbacked ones, and here there are no unbacked ones to warn about. The sheet is
+still what a hand-picked deletion gets, which is why `deletionFollowsImport`
+exists to pick between them.

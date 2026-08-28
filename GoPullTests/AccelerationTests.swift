@@ -53,6 +53,28 @@ struct AccelerationTests {
         #expect(AccelerationDetector.runs(in: track(values), settings: .init()).isEmpty)
     }
 
+    /// Where the clock starts, which is what GX010050 got wrong.
+    ///
+    /// Two stationary samples of GPS noise ended the "rest", the bike then sat
+    /// still for another six seconds, and `departureIndex` scanned straight
+    /// past that to the real launch -- but the run was still timed from the
+    /// noise. A 3.3-second 0-30 was reported as 10.05s. The start has to be the
+    /// last rest before *this* departure, not before the first stretch of rest
+    /// in the clip.
+    @Test func stationaryNoiseDoesNotAnchorTheRun() throws {
+        var settings = AccelerationSettings()
+        settings.targets = [30]
+        var values = [Double](repeating: 0.1, count: 20)    // stopped
+        values += [1.7, 2.2, 2.1, 2.3]                      // a creep, then stopped again
+        values += [Double](repeating: 0.15, count: 30)
+        values += launch(rest: 0, seconds: 5, top: 40)      // the actual launch, at 5.4s
+        let runs = AccelerationDetector.runs(in: track(values), settings: settings)
+        #expect(runs.count == 1)
+        let run = try #require(runs.first)
+        #expect(run.start > 5)
+        #expect(abs(run.splits[30]! - 3.65) < 0.3)
+    }
+
     /// Pulling away gently and reaching 10 mph twenty seconds later is not a
     /// standing start; reporting it as one buries the real runs.
     @Test func aPotterIsNotALaunch() {

@@ -257,6 +257,14 @@ struct ContentView: View {
                                  details: model.previews.details[file.id])
             }
         }
+        .sheet(isPresented: Binding(get: { model.pendingDeletion != nil },
+                                    set: { if !$0 { model.cancelDeletion() } })) {
+            if let plan = model.pendingDeletion {
+                DeleteConfirmationView(plan: plan, destination: model.destination,
+                                       onDelete: { model.confirmDeletion() },
+                                       onCancel: { model.cancelDeletion() })
+            }
+        }
         .sheet(item: $editingOverlays) { file in
             if let url = model.importedURL(for: file) {
                 OverlayEditorView(file: file, url: url)
@@ -338,6 +346,13 @@ struct ContentView: View {
                     model.setIncludesRaw(!model.includesRaw(row), for: row)
                 }
             }
+            Divider()
+            Button("Delete from Camera…") {
+                let chosen = selection.contains(row.id)
+                    ? model.rows(withIDs: selection) : [row]
+                model.requestDeletion(of: chosen)
+            }
+            .disabled(model.importer.isRunning || model.isDeleting)
             Divider()
             Button("Tick All for Overlays") { model.setOverlaysEnabledForAll(true) }
             Button("Untick All") { model.setOverlaysEnabledForAll(false) }
@@ -480,6 +495,14 @@ struct ContentView: View {
     private var footer: some View {
         VStack(spacing: 10) {
             if model.importer.isRunning { importProgress }
+            if model.isDeleting {
+                HStack(spacing: 6) {
+                    ProgressView().controlSize(.small)
+                    Text("Deleting from the camera… \(model.deletedCount)")
+                    Spacer()
+                }
+                .font(.caption).foregroundStyle(.secondary)
+            }
             if let converting = model.convertingGPR {
                 HStack(spacing: 6) {
                     ProgressView().controlSize(.small)

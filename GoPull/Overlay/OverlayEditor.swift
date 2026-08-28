@@ -110,7 +110,12 @@ final class OverlayEditorModel: ObservableObject {
         maxSpeed = OverlayComposer.maxSpeed(for: raw, unit: settings.gauge.unit)
         gforce = rawGForce.smoothed(settings.gforce.smoothing)
         extremes = gforce.extremes
-        runs = AccelerationDetector.runs(in: track, gforce: gforce,
+        // Timed on the *raw* track. A trailing average is a drawing tool: it
+        // delays every threshold crossing by about half its window, and it
+        // fills in the dip between two back-to-back launches well enough that
+        // the second one stops looking like a standing start at all -- 0.5s
+        // smoothing turned the two runs in GX010050 into one.
+        runs = AccelerationDetector.runs(in: raw, gforce: rawGForce,
                                          settings: settings.acceleration.detection)
         // Scaled from the smoothed track, which is what gets drawn: the raw
         // peak on this ride is 2.82 g against 1.01 g smoothed, and scaling to
@@ -139,7 +144,7 @@ final class OverlayEditorModel: ObservableObject {
 
     /// Why there are no launches, in terms of what the clip actually contains.
     var launchExplanation: String {
-        AccelerationDetector.diagnose(in: track, settings: settings.acceleration.detection)
+        AccelerationDetector.diagnose(in: raw, settings: settings.acceleration.detection)
             .explanation(settings.acceleration.detection)
     }
 

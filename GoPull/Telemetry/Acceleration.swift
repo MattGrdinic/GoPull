@@ -149,7 +149,9 @@ enum AccelerationDetector {
     ///
     /// `gforce` is optional; with it the start time is pinned from the
     /// accelerometer, which is both earlier and far more precise than the
-    /// moment GPS speed convincingly leaves zero.
+    /// moment GPS speed convincingly leaves zero. Pass the *raw* tracks: this
+    /// smooths the accelerometer itself, by a fixed amount, so a reported 0-60
+    /// does not move when the display smoothing slider does.
     static func runs(in track: TelemetryTrack,
                      gforce: GForceTrack? = nil,
                      settings: AccelerationSettings = .init()) -> [AccelerationRun] {
@@ -159,6 +161,11 @@ enum AccelerationDetector {
         func speed(_ index: Int) -> Double {
             unit.value(fromMetresPerSecond: points[index].speed2D)
         }
+
+        // Enough to clear the 200 Hz noise floor without blunting the onset:
+        // raw, the noise alone can hold 0.02 g for the 20 samples the sustained
+        // check asks for, which pins the start early.
+        let onset = gforce?.smoothed(Smoothing(seconds: 0.1))
 
         var result: [AccelerationRun] = []
         var index = 0
@@ -178,10 +185,23 @@ enum AccelerationDetector {
                                                  speed: speed, settings: settings)
             else { index = lastAtRest + 1; continue }
 
+            // Re-anchor to the rest immediately before *this* departure.
+            //
+            // The search above stops at the first sample above `restSpeed`, but
+            // `departureIndex` will happily scan past a creep and any amount of
+            // rest after it. Measured on GX010050: two stationary samples of GPS
+            // noise at 0.1s ended the "rest", the bike then sat still until 6.8s,
+            // and the run was timed from 0.1s -- reporting a 3.5-second 0-30 as
+            // 10.05s. The start is the last moment at rest before the departure,
+            // not before the first stretch of rest in the clip.
+            var anchor = departure - 1
+            while anchor > lastAtRest, speed(anchor) > settings.restSpeed { anchor -= 1 }
+            lastAtRest = anchor
+
             var run = AccelerationRun(start: points[lastAtRest].time)
-            if let gforce {
+            if let onset {
                 run.start = refinedStart(near: points[lastAtRest].time,
-                                         until: points[departure].time, in: gforce)
+                                         until: points[departure].time, in: onset)
             }
 
             var peak = 0.0

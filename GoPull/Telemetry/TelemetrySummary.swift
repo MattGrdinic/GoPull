@@ -69,7 +69,7 @@ enum TelemetryProbe {
         summary.peakG = smoothed.peakPlanar
 
         if track.hasFix {
-            summary.launches = AccelerationDetector.runs(in: track, gforce: smoothed,
+            summary.launches = AccelerationDetector.runs(in: track, gforce: gforce,
                                                          settings: detection).count
         }
         return summary

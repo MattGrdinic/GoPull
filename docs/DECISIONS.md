@@ -505,3 +505,57 @@ log show --last 5m --predicate 'eventMessage CONTAINS "Publishing changes"' --st
 
 Under Xcode the same warning can pause the app, which is why it looks far worse there than in a
 standalone run.
+
+## 27. Launches are timed on the raw track, anchored to the rest before them
+
+Two separate faults, both found on `GX010050` — a clip with two real standing starts that
+the app timed as one 7-second run when the rider counted about four.
+
+**The anchor.** `runs()` walked forward to the first sample above `restSpeed`, called that the
+end of "rest", and then let `departureIndex` scan on until speed genuinely held above
+`movingSpeed`. Those two can be a long way apart. On `GX010050` two samples of GPS noise at
+0.1s ended the rest; the bike then sat still until 6.8s and launched; the run was still timed
+from 0.1s. A 3.32-second 0-30 was reported as **10.05s**. The clock now starts at the last
+sample at rest *before that departure*, found by walking back from it:
+
+```swift
+var anchor = departure - 1
+while anchor > lastAtRest, speed(anchor) > settings.restSpeed { anchor -= 1 }
+lastAtRest = anchor
+```
+
+**The smoothing.** Detection ran on the same smoothed track the gauge draws from. A trailing
+average is a drawing tool — it exists to settle the needle — and it does two things to a
+measurement: it delays every threshold crossing by roughly half its window, and it fills in
+the dip between two back-to-back launches. At the default 0.5s, `GX010050`'s two runs came
+back as **one**. Detection now takes the raw track at every call site (`OverlayEditor`,
+`AppModel`, `TelemetrySummary`); `smoothed()` is only ever applied to what gets rendered.
+
+The accelerometer is the exception, and it is smoothed *inside* the detector by a fixed 0.1s.
+Raw at 200 Hz, the noise floor alone can hold 0.02 g for the 20 samples the sustained-push
+check asks for, which pins the start early. Doing it in the detector rather than at the call
+site also means a reported 0-60 does not move when the display smoothing slider does.
+
+Verified on the card: 0-30 of 3.32s and 4.54s, against interpolated 30 mph crossings at
+10.390s and 29.800s and rest ending at 7.07s and 25.26s.
+
+## 28. Deleting names the files, and separates the backed from the unbacked
+
+The camera has no trash. `/gopro/media/delete/file?path=…` is immediate and there is nothing
+to undo it with, so the confirmation is a sheet rather than an alert: it lists the shots by
+name and splits them into those with a verified full-size copy in the destination and those
+without. That split is the only thing that matters — a backed shot can be pulled back from
+disk, an unbacked one is the only copy there is — so it drives the warning, the button label
+and the ordering.
+
+`DeletionPlan` lives outside `AppModel` and takes an `isBacked` closure, so what the sheet
+claims can be tested without the `@MainActor` singleton. A shot counts as backed only when
+*every* file of it does, which is what makes a JPEG whose paired GPR never came across still
+read as the only copy of that raw.
+
+Delete is on the context menu, not the footer, and the destructive button is not the default
+action — it should take a deliberate click, not a stray Return. It is disabled outright while
+an import is running, for the same reason nothing else touches the control API then (#12).
+
+Tested against the card: 53 files to 52, the target returning 404 afterwards and every other
+file still listed.

@@ -193,6 +193,21 @@ region of a row by hand.
 API that must stay untouched during an import, and playback would be a fifth stream. `PreviewStore`
 suspends and `ContentView` disables preview while `importer.isRunning`.
 
+**Time launches on the raw track, and anchor to the rest *before the departure*.** Smoothing is
+a drawing tool: a trailing average delays every threshold crossing by about half its window and
+fills in the dip between two back-to-back launches, so at the default 0.5s the two runs in
+`GX010050` came back as one. Separately, `runs()` used to time from the first stretch of rest it
+found rather than the one the launch actually left — two samples of GPS noise reported a
+3.3-second 0-30 as 10.05s. The accelerometer is smoothed *inside* the detector, by a fixed
+0.1s, so a reported 0-60 doesn't move when the display slider does. Detail in DECISIONS #27.
+
+**Deleting is irreversible and the card has no trash.** The confirmation names the shots and
+splits them into backed (a verified full-size copy in the destination) and unbacked; a shot is
+only backed when every file of it is, so an unimported GPR keeps its JPEG's row in the warning.
+`DeletionPlan` sits outside `AppModel` and takes an `isBacked` closure so it can be tested
+without the singleton. Delete is a context-menu item, the destructive button is not the default
+action, and it is disabled during an import.
+
 **Camera present with no card looks like no camera.** `/gopro/media/list` fails either way.
 `refresh()` disambiguates with `keepAlive()`; don't collapse those branches.
 

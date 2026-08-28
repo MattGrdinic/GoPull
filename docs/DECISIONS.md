@@ -709,3 +709,97 @@ are consistently in the vehicle frame.
 rather than by scanning pixels for a red blob — the first attempt at that test
 failed twice on bitmap row order, which is a good sign the test was measuring the
 wrong thing.
+
+
+## 34. The camera's timestamps are local time labelled UTC
+
+Photos taken at noon in Arizona were listed as 05:02 — seven hours out, which is
+exactly the UTC offset, in the direction that means local time was being read as
+UTC.
+
+Both of the camera's timestamp sources do it. `/gopro/media/list` reports `mod`
+and `cre` as seconds since the epoch *computed from the local wall clock*, and
+`GET` on a file returns `Last-Modified: Fri, 28 Aug 2026 12:02:32 GMT` for a
+photo taken at 12:02 local. Neither says anywhere that it is local.
+
+`GoProCamera` reads `/gopro/camera/get_date_time` once at discovery and works the
+offset out by parsing the camera's own wall clock *as if it were UTC* and
+comparing it with now. That deliberately ignores the `tzone` and `dst` fields the
+same response carries: it is not documented whether `tzone` already includes
+daylight saving or whether `dst` must be added to it, and guessing wrong is an
+hour's error for half the year across most of the world. Reading the clock needs
+no such interpretation, and on this camera it produced -25200s against a reported
+`tzone` of -420 minutes — the same answer, arrived at without the guess.
+
+The result is rounded to a quarter hour, since every real zone is a multiple of
+one, so a camera clock a few minutes out cannot skew it; and an offset over 15
+hours is refused, because that is a wrong clock rather than a time zone and
+baking it in would move every timestamp by the same error.
+
+Two traps worth knowing. The static helper cannot be called `clockOffset` while
+the property is: `GoProCamera.clockOffset(...)` is then ambiguous against the
+property's unapplied member reference, and the compiler answers "failed to
+produce diagnostic for expression" rather than saying so. And in the tests,
+`#expect(offset == -7 * 3600)` against a `TimeInterval?` fails — the bare literal
+expression does not infer to Double there — so the expectation is a typed
+constant.
+
+
+## 35. Delete-after-import offers, it does not act
+
+The option is off unless asked for and remembered once set, and when set it still
+asks every time. The confirmation is not skippable and there is no "don't ask
+again": the card has no trash, and an import that reported success is the only
+thing standing between the footage and nothing.
+
+What it offers is narrowed three ways, in `DeletionPlan.afterImport`:
+
+* **Only a clean run.** A cancelled or partly failed import is exactly when the
+  copy on this Mac is least worth trusting, so nothing is offered at all.
+* **Only what is verified on disk.** The importer reporting no failure is not the
+  same as the bytes being there, so every file is re-checked at full size — the
+  same test `importedURL` makes. Confirmed against the camera: a real still is
+  offered, the same still one kilobyte short is not.
+* **Only whole shots.** A shot whose raw was left behind by the RAW toggle is
+  never offered, because deleting it would take the raw with it.
+
+Because the result is all-backed by construction, the prompt is a plain alert
+rather than the sheet from #28 — that sheet exists to separate backed shots from
+unbacked ones, and here there are no unbacked ones to warn about. The sheet is
+still what a hand-picked deletion gets, which is why `deletionFollowsImport`
+exists to pick between them.
+
+
+## 36. A presentation binding's setter must not write `@Published`
+
+"Publishing changes from within view updates is not allowed" came back with the
+delete prompts. Same mechanism as #26 and a different symptom: SwiftUI calls a
+presentation binding's `set:` *while it is updating*, so
+
+```swift
+.sheet(isPresented: Binding(get: { model.pendingDeletion != nil },
+                            set: { if !$0 { model.cancelDeletion() } }))
+```
+
+fires `objectWillChange` inside the update pass every time the sheet dismisses.
+
+It was loud here for two reasons. `cancelDeletion()` writes two published
+properties, and clearing `pendingDeletion` dismisses *both* the post-import alert
+and the hand-picked sheet, so both setters ran — four published writes per
+dismissal.
+
+The fix is #26's: the binding only ever touches `@State`, and the model is
+brought into line from `onChange`, which runs after the update. A single
+`DeletePrompt` enum in `@State` says which prompt is up, mirrored from the model
+one way and reconciled back the other. Buttons still call the model directly —
+a button action is not an update pass — and the `onChange` back-edge is guarded
+so a button and the dismissal setter cannot cancel twice.
+
+The error alert had the same shape (`set: { model.errorMessage = nil }`) and was
+fixed the same way. The one binding left that writes to the model is the camera
+number `Stepper`, which is a control action rather than a presentation dismissal.
+
+Measuring this is awkward: `log show --predicate 'eventMessage CONTAINS
+"Publishing changes"'` returned 0 while the warnings were being seen, because
+under Xcode they surface on the console rather than in the unified log. Check the
+Xcode console, or run the app standalone and use the log.

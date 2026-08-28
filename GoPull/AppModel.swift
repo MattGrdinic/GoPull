@@ -92,6 +92,15 @@ final class AppModel: ObservableObject {
     @Published private(set) var gprConverted = 0
     @Published var gprError: String?
 
+    /// Offer to clear the card once an import has finished.
+    ///
+    /// Off unless asked for, and it only ever *offers*: the confirmation is not
+    /// skippable, because the card has no trash and an import that looked fine
+    /// is still the only thing standing between the footage and nothing.
+    @Published var deleteAfterImport: Bool {
+        didSet { UserDefaults.standard.set(deleteAfterImport, forKey: "deleteAfterImport") }
+    }
+
     /// Run the saved overlay preset over each clip as it finishes importing.
     @Published var overlaysAfterImport: Bool {
         didSet { UserDefaults.standard.set(overlaysAfterImport, forKey: "overlaysAfterImport") }
@@ -120,6 +129,7 @@ final class AppModel: ObservableObject {
                 .appendingPathComponent("Movies/GoPro")
         }
         overlaysAfterImport = defaults.object(forKey: "overlaysAfterImport") as? Bool ?? false
+        deleteAfterImport = defaults.object(forKey: "deleteAfterImport") as? Bool ?? false
         groupsByDate = defaults.object(forKey: "groupsByDate") as? Bool ?? true
         thumbnailSize = defaults.object(forKey: "thumbnailSize") as? Double ?? 36
         convertGPRToDNG = defaults.object(forKey: "convertGPRToDNG") as? Bool ?? false
@@ -392,6 +402,10 @@ final class AppModel: ObservableObject {
     }
 
     @Published var pendingDeletion: DeletionPlan?
+    /// Set when the pending deletion came from finishing an import, so the UI
+    /// can ask briefly: everything in it is verified on disk by construction,
+    /// and the sheet's warning about unbacked shots would have nothing to say.
+    @Published private(set) var deletionFollowsImport = false
     @Published private(set) var isDeleting = false
     @Published private(set) var deletedCount = 0
     @Published var deletionError: String?
@@ -404,12 +418,33 @@ final class AppModel: ObservableObject {
         pendingDeletion = plan
     }
 
-    func cancelDeletion() { pendingDeletion = nil }
+    func cancelDeletion() {
+        pendingDeletion = nil
+        deletionFollowsImport = false
+    }
+
+    /// Offers to remove what an import just copied across.
+    ///
+    /// Only whole shots, and only ones every file of which is now on this Mac at
+    /// full size -- `done` means the importer reported no failure, which is not
+    /// the same as the bytes being there. A shot whose raw was left behind by
+    /// the RAW toggle is therefore never offered, which is right: deleting it
+    /// would take the raw with it.
+    private func proposeDeletionAfterImport(of imported: [MediaFile]) {
+        guard !imported.isEmpty, pendingDeletion == nil, !isDeleting else { return }
+        let plan = DeletionPlan.afterImport(imported, among: rows) {
+            self.importedURL(for: $0) != nil
+        }
+        guard !plan.isEmpty else { return }
+        pendingDeletion = plan
+        deletionFollowsImport = true
+    }
 
     /// Deletes the files in the confirmed plan, one at a time.
     func confirmDeletion() {
         guard let plan = pendingDeletion, let camera, !isDeleting else { return }
         pendingDeletion = nil
+        deletionFollowsImport = false
         isDeleting = true
         deletedCount = 0
         deletionError = nil
@@ -813,6 +848,12 @@ final class AppModel: ObservableObject {
         // made longer.
         if overlaysAfterImport, !Task.isCancelled {
             queueOverlays(for: done)
+        }
+
+        // Last, and only for a clean run: a cancelled or partly failed import
+        // is exactly when the copy on this Mac is least worth trusting.
+        if deleteAfterImport, failures.isEmpty, !Task.isCancelled {
+            proposeDeletionAfterImport(of: done)
         }
     }
 }

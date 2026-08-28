@@ -171,6 +171,12 @@ so SwiftUI's `VideoPlayer` crashes on first render with `SIGABRT` in `getSupercl
 `PreviewWindow.swift` wraps `AVPlayerView` directly, which is a hard symbol reference and pulls
 AVKit in. Check `otool -L` before suspecting SwiftUI.
 
+**Nor to a sheet or alert's `isPresented:`.** SwiftUI calls a presentation binding's `set:`
+while it is updating, so a setter that clears `@Published` state ("`model.cancelDeletion()`",
+"`model.errorMessage = nil`") raises the same warning on every dismissal. The binding gets
+`@State` only; `onChange` reconciles the model afterwards. Clearing `pendingDeletion` dismisses
+both delete prompts at once, so that one cost four published writes per dismissal. DECISIONS #36.
+
 **Never bind a `@Published` property to `List(selection:)`.** The List writes the new value back
 *while it is updating rows*, so `objectWillChange` fires mid-update: "Publishing changes from
 within view updates is not allowed" — 14 times per click on a 12-row list, and SwiftUI then
@@ -207,12 +213,26 @@ found rather than the one the launch actually left — two samples of GPS noise 
 3.3-second 0-30 as 10.05s. The accelerometer is smoothed *inside* the detector, by a fixed
 0.1s, so a reported 0-60 doesn't move when the display slider does. Detail in DECISIONS #27.
 
+**Delete-after-import offers whole verified shots only, and always asks.** It is skipped
+entirely unless the import ran clean (no failures, not cancelled), every file is re-checked on
+disk at full size rather than trusted from "no failure reported", and a shot whose raw stayed
+behind is never offered. The result is all-backed by construction, so the prompt is a plain
+alert; `deletionFollowsImport` is what picks it over the sheet below.
+
 **Deleting is irreversible and the card has no trash.** The confirmation names the shots and
 splits them into backed (a verified full-size copy in the destination) and unbacked; a shot is
 only backed when every file of it is, so an unimported GPR keeps its JPEG's row in the warning.
 `DeletionPlan` sits outside `AppModel` and takes an `isBacked` closure so it can be tested
 without the singleton. Delete is a context-menu item, the destructive button is not the default
 action, and it is disabled during an import.
+
+**Every timestamp the camera reports is local time wearing a UTC label.** `/gopro/media/list`
+gives `mod`/`cre` as an epoch computed from the camera's *local* wall clock, and the file server
+puts that same local time in `Last-Modified` with `GMT` after it — so a noon photo in Arizona
+showed as 05:02. `GoProCamera` works the offset out at discovery by reading the camera's own
+clock as UTC and comparing it with now, rounded to a quarter hour, and both timestamp paths
+subtract it. Deliberately *not* from the `tzone`/`dst` fields: it is undocumented whether `tzone`
+already includes daylight saving, and guessing wrong is an hour out for half the year.
 
 **Camera present with no card looks like no camera.** `/gopro/media/list` fails either way.
 `refresh()` disambiguates with `keepAlive()`; don't collapse those branches.

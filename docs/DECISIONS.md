@@ -559,3 +559,9 @@ an import is running, for the same reason nothing else touches the control API t
 
 Tested against the card: 53 files to 52, the target returning 404 afterwards and every other
 file still listed.
+
+Afterwards the store forgets only the files that went, not everything it knows. Clearing it
+wholesale — by pushing an empty camera IP through `update(cameraIP:)` — left every remaining
+row showing a blank placeholder, because a row asks for its preview from `.task` and that does
+not run again for rows that stayed on screen. Deleting one clip says nothing about any other
+clip's thumbnail, so there was never a reason to drop them.

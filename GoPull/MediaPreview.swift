@@ -113,6 +113,23 @@ final class PreviewStore: ObservableObject {
         queued.removeAll()
     }
 
+    /// Drops what is known about files that have gone from the card.
+    ///
+    /// Only these entries are stale: deleting one clip says nothing about any
+    /// other clip's thumbnail. Clearing the whole store instead left every row
+    /// blank, because a row only asks for its preview from `.task` and that
+    /// does not run again for rows that stayed on screen.
+    func forget(_ files: [MediaFile]) {
+        for file in files {
+            thumbnails[file.id] = nil
+            details[file.id] = nil
+            summaries[file.id] = nil
+            unavailable.remove(file.id)
+            queued.remove(file.id)
+        }
+        queue.removeAll { file in files.contains { $0.id == file.id } }
+    }
+
     /// Called when an import starts. In-flight work is dropped, not awaited.
     func suspend() {
         isSuspended = true

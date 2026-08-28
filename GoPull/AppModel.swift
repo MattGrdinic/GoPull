@@ -434,8 +434,7 @@ final class AppModel: ObservableObject {
                     : "\(failed.count) files could not be deleted: \(failed.prefix(3).joined(separator: ", "))…"
             }
             self.isDeleting = false
-            self.previews.update(cameraIP: "")     // the card changed; drop cached previews
-            self.previews.update(cameraIP: camera.ip)
+            self.previews.forget(plan.files)
             await self.refresh()
         }
     }

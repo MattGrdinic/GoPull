@@ -26,6 +26,27 @@ struct ContentView: View {
     /// mirrored below, in `onChange`, which runs *after* the update completes.
     @State private var selection: Set<String> = []
 
+    /// Which deletion prompt is up, mirrored from the model.
+    ///
+    /// SwiftUI calls a presentation binding's setter *while it is updating*, so
+    /// a setter that writes `@Published` state fires `objectWillChange` inside
+    /// the update pass -- "Publishing changes from within view updates is not
+    /// allowed". Same mechanism as the selection binding in DECISIONS #26, and
+    /// the same fix: the binding only ever touches `@State`, and the model is
+    /// brought into line from `onChange`, which runs after the update.
+    ///
+    /// It was loudest here because clearing `pendingDeletion` dismisses the
+    /// alert *and* the sheet, so both setters ran, and `cancelDeletion()`
+    /// writes two published properties each time.
+    private enum DeletePrompt: Equatable { case none, alert, sheet }
+    @State private var deletePrompt: DeletePrompt = .none
+    @State private var showsError = false
+
+    private var modelDeletePrompt: DeletePrompt {
+        guard model.pendingDeletion != nil else { return .none }
+        return model.deletionFollowsImport ? .alert : .sheet
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             header
@@ -46,12 +67,23 @@ struct ContentView: View {
             }
         }
         .frame(minWidth: 620, minHeight: 460)
-        .alert("Something went wrong",
-               isPresented: Binding(get: { model.errorMessage != nil },
-                                    set: { if !$0 { model.errorMessage = nil } })) {
-            Button("OK", role: .cancel) { model.errorMessage = nil }
+        .alert("Something went wrong", isPresented: $showsError) {
+            Button("OK", role: .cancel) {}
         } message: {
             Text(model.errorMessage ?? "")
+        }
+        .onChange(of: model.errorMessage == nil) { _, cleared in
+            showsError = !cleared
+        }
+        .onChange(of: showsError) { _, showing in
+            if !showing, model.errorMessage != nil { model.errorMessage = nil }
+        }
+        .onChange(of: modelDeletePrompt) { _, prompt in
+            deletePrompt = prompt
+        }
+        .onChange(of: deletePrompt) { _, prompt in
+            // Dismissed by Escape or a click outside, rather than by a button.
+            if prompt == .none, model.pendingDeletion != nil { model.cancelDeletion() }
         }
     }
 
@@ -258,9 +290,8 @@ struct ContentView: View {
             }
         }
         .alert("Delete \(model.pendingDeletion?.rows.count ?? 0) item(s) from the camera?",
-               isPresented: Binding(get: { model.pendingDeletion != nil
-                                           && model.deletionFollowsImport },
-                                    set: { if !$0 { model.cancelDeletion() } })) {
+               isPresented: Binding(get: { deletePrompt == .alert },
+                                    set: { if !$0 { deletePrompt = .none } })) {
             Button("Keep on Camera", role: .cancel) { model.cancelDeletion() }
             Button("Delete", role: .destructive) { model.confirmDeletion() }
         } message: {
@@ -270,9 +301,8 @@ struct ContentView: View {
                      + "The camera has no trash — this cannot be undone.")
             }
         }
-        .sheet(isPresented: Binding(get: { model.pendingDeletion != nil
-                                           && !model.deletionFollowsImport },
-                                    set: { if !$0 { model.cancelDeletion() } })) {
+        .sheet(isPresented: Binding(get: { deletePrompt == .sheet },
+                                    set: { if !$0 { deletePrompt = .none } })) {
             if let plan = model.pendingDeletion {
                 DeleteConfirmationView(plan: plan, destination: model.destination,
                                        onDelete: { model.confirmDeletion() },

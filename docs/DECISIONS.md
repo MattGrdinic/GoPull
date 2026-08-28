@@ -768,3 +768,38 @@ rather than the sheet from #28 — that sheet exists to separate backed shots fr
 unbacked ones, and here there are no unbacked ones to warn about. The sheet is
 still what a hand-picked deletion gets, which is why `deletionFollowsImport`
 exists to pick between them.
+
+
+## 36. A presentation binding's setter must not write `@Published`
+
+"Publishing changes from within view updates is not allowed" came back with the
+delete prompts. Same mechanism as #26 and a different symptom: SwiftUI calls a
+presentation binding's `set:` *while it is updating*, so
+
+```swift
+.sheet(isPresented: Binding(get: { model.pendingDeletion != nil },
+                            set: { if !$0 { model.cancelDeletion() } }))
+```
+
+fires `objectWillChange` inside the update pass every time the sheet dismisses.
+
+It was loud here for two reasons. `cancelDeletion()` writes two published
+properties, and clearing `pendingDeletion` dismisses *both* the post-import alert
+and the hand-picked sheet, so both setters ran — four published writes per
+dismissal.
+
+The fix is #26's: the binding only ever touches `@State`, and the model is
+brought into line from `onChange`, which runs after the update. A single
+`DeletePrompt` enum in `@State` says which prompt is up, mirrored from the model
+one way and reconciled back the other. Buttons still call the model directly —
+a button action is not an update pass — and the `onChange` back-edge is guarded
+so a button and the dismissal setter cannot cancel twice.
+
+The error alert had the same shape (`set: { model.errorMessage = nil }`) and was
+fixed the same way. The one binding left that writes to the model is the camera
+number `Stepper`, which is a control action rather than a presentation dismissal.
+
+Measuring this is awkward: `log show --predicate 'eventMessage CONTAINS
+"Publishing changes"'` returned 0 while the warnings were being seen, because
+under Xcode they surface on the console rather than in the unified log. Check the
+Xcode console, or run the app standalone and use the log.

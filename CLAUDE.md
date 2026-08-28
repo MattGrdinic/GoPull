@@ -171,6 +171,12 @@ so SwiftUI's `VideoPlayer` crashes on first render with `SIGABRT` in `getSupercl
 `PreviewWindow.swift` wraps `AVPlayerView` directly, which is a hard symbol reference and pulls
 AVKit in. Check `otool -L` before suspecting SwiftUI.
 
+**Nor to a sheet or alert's `isPresented:`.** SwiftUI calls a presentation binding's `set:`
+while it is updating, so a setter that clears `@Published` state ("`model.cancelDeletion()`",
+"`model.errorMessage = nil`") raises the same warning on every dismissal. The binding gets
+`@State` only; `onChange` reconciles the model afterwards. Clearing `pendingDeletion` dismisses
+both delete prompts at once, so that one cost four published writes per dismissal. DECISIONS #36.
+
 **Never bind a `@Published` property to `List(selection:)`.** The List writes the new value back
 *while it is updating rows*, so `objectWillChange` fires mid-update: "Publishing changes from
 within view updates is not allowed" — 14 times per click on a 12-row list, and SwiftUI then

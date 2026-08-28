@@ -11,6 +11,8 @@ struct ContentView: View {
     @State private var choosingDestination = false
     @State private var previewing: MediaFile?
     @State private var editingOverlays: MediaFile?
+    /// Set when Overlays is asked for on a clip that is not on disk yet.
+    @State private var overlayNeedsImport: MediaFile?
     /// Selection is owned by SwiftUI here, not read straight off the model.
     ///
     /// `List(selection:)` writes the new value back *while it is updating the
@@ -255,10 +257,32 @@ struct ContentView: View {
                                  details: model.previews.details[file.id])
             }
         }
+        .sheet(isPresented: Binding(get: { model.pendingDeletion != nil },
+                                    set: { if !$0 { model.cancelDeletion() } })) {
+            if let plan = model.pendingDeletion {
+                DeleteConfirmationView(plan: plan, destination: model.destination,
+                                       onDelete: { model.confirmDeletion() },
+                                       onCancel: { model.cancelDeletion() })
+            }
+        }
         .sheet(item: $editingOverlays) { file in
             if let url = model.importedURL(for: file) {
                 OverlayEditorView(file: file, url: url)
             }
+        }
+        // A dead button explains nothing; this offers the way forward.
+        .alert("Import \(overlayNeedsImport?.name ?? "this clip") first?",
+               isPresented: Binding(get: { overlayNeedsImport != nil },
+                                    set: { if !$0 { overlayNeedsImport = nil } })) {
+            Button("Import Now") {
+                if let file = overlayNeedsImport { model.startImport([file]) }
+                overlayNeedsImport = nil
+            }
+            Button("Cancel", role: .cancel) { overlayNeedsImport = nil }
+        } message: {
+            Text("Overlays are positioned against the copy on disk, because the "
+                 + "telemetry and the video have to come from the same file and "
+                 + "the camera cannot be scrubbed over USB.")
         }
     }
 
@@ -281,6 +305,7 @@ struct ContentView: View {
                     Text(file.name)
                     if row.hasRaw { rawBadge(row) }
                     if row.isVideo { overlayBadge(file) }
+                    if row.isVideo { telemetryBadges(file) }
                     if row.isRawOnly {
                         badge("RAW", filled: true)
                             .help("A raw photo with no JPEG beside it")
@@ -313,14 +338,21 @@ struct ContentView: View {
         .contextMenu {
             Button("Preview") { preview(file) }
                 .disabled(model.importer.isRunning || model.previewSource(for: file) == nil)
-            Button("Overlays…") { editingOverlays = file }
-                .disabled(model.importer.isRunning || model.importedURL(for: file) == nil)
+            Button("Overlays…") { openOverlays(file) }
+                .disabled(model.importer.isRunning || !row.isVideo)
             if row.hasRaw {
                 Divider()
                 Button(model.includesRaw(row) ? "Skip the RAW file" : "Include the RAW file") {
                     model.setIncludesRaw(!model.includesRaw(row), for: row)
                 }
             }
+            Divider()
+            Button("Delete from Camera…") {
+                let chosen = selection.contains(row.id)
+                    ? model.rows(withIDs: selection) : [row]
+                model.requestDeletion(of: chosen)
+            }
+            .disabled(model.importer.isRunning || model.isDeleting)
             Divider()
             Button("Tick All for Overlays") { model.setOverlaysEnabledForAll(true) }
             Button("Untick All") { model.setOverlaysEnabledForAll(false) }
@@ -345,6 +377,28 @@ struct ContentView: View {
         .help(model.includesRaw(row)
               ? "The .GPR will be imported with this photo — click to skip it"
               : "The .GPR will be skipped — click to include it")
+    }
+
+    /// What the camera says is in this clip, before it is copied.
+    ///
+    /// Importing an 11 GB clip to find out it has no GPS is a slow way to learn
+    /// it, so the telemetry is fetched from the camera in the background and
+    /// the answer shown here.
+    @ViewBuilder
+    private func telemetryBadges(_ file: MediaFile) -> some View {
+        if let summary = model.previews.summaries[file.id] {
+            HStack(spacing: 3) {
+                Image(systemName: summary.hasFix ? "location.fill" : "location.slash")
+                    .font(.caption2)
+                    .foregroundStyle(summary.hasFix ? Color.accentColor : Color.secondary)
+                if summary.launches > 0 {
+                    Image(systemName: "stopwatch")
+                        .font(.caption2)
+                        .foregroundStyle(Color.accentColor)
+                }
+            }
+            .help(summary.caption(unit: .mph))
+        }
     }
 
     /// Whether this clip gets an overlay when overlays are generated.
@@ -385,6 +439,9 @@ struct ContentView: View {
         if let summary = model.previews.details[row.primary.id]?.summary, !summary.isEmpty {
             parts.append(summary)
         }
+        if row.isVideo, let telemetry = model.previews.summaries[row.primary.id] {
+            parts.append(telemetry.caption(unit: .mph))
+        }
         if row.hasRaw, !model.includesRaw(row) { parts.append("RAW skipped") }
         return parts.joined(separator: " · ")
     }
@@ -401,13 +458,36 @@ struct ContentView: View {
             .primary
     }
 
-    /// Overlays are edited against the imported copy, so this stays nil until a
-    /// clip is actually on disk.
+    /// The clip the Overlays button acts on: any single selected video.
+    ///
+    /// Deliberately *not* filtered by whether it has been imported. It used to
+    /// be, and the button then went dead with no explanation for three separate
+    /// reasons -- a photo selected, more than one row, or a clip not yet copied
+    /// -- which is indistinguishable from the feature being broken. It stays
+    /// live now and says what is in the way.
     private var overlayTarget: MediaFile? {
         guard !model.importer.isRunning, selection.count == 1, let id = selection.first
         else { return nil }
-        return model.rows.first { $0.id == id && model.importedURL(for: $0.primary) != nil }?
-            .primary
+        return model.rows.first { $0.id == id && $0.isVideo }?.primary
+    }
+
+    /// Why the Overlays button cannot act, if it cannot.
+    private var overlayBlocker: String? {
+        if model.importer.isRunning { return "Not while an import is running." }
+        if selection.isEmpty { return "Select a clip first." }
+        if selection.count > 1 { return "Select a single clip." }
+        guard let id = selection.first, let row = model.rows.first(where: { $0.id == id })
+        else { return "Select a clip first." }
+        if !row.isVideo { return "Overlays need a video — this is a photo." }
+        return nil
+    }
+
+    private func openOverlays(_ file: MediaFile) {
+        if model.importedURL(for: file) == nil {
+            overlayNeedsImport = file
+        } else {
+            editingOverlays = file
+        }
     }
 
     // MARK: - Footer
@@ -415,6 +495,14 @@ struct ContentView: View {
     private var footer: some View {
         VStack(spacing: 10) {
             if model.importer.isRunning { importProgress }
+            if model.isDeleting {
+                HStack(spacing: 6) {
+                    ProgressView().controlSize(.small)
+                    Text("Deleting from the camera… \(model.deletedCount)")
+                    Spacer()
+                }
+                .font(.caption).foregroundStyle(.secondary)
+            }
             if let converting = model.convertingGPR {
                 HStack(spacing: 6) {
                     ProgressView().controlSize(.small)
@@ -520,14 +608,12 @@ struct ContentView: View {
                 .help("Play the camera's low-resolution proxy without copying anything")
 
                 Button {
-                    if let target = overlayTarget { editingOverlays = target }
+                    if let target = overlayTarget { openOverlays(target) }
                 } label: {
                     Label("Overlays", systemImage: "speedometer")
                 }
                 .disabled(overlayTarget == nil)
-                .help(overlayTarget == nil
-                      ? "Import a clip first — overlays are edited against the copy on disk."
-                      : "Position the speed gauge and route map on this clip.")
+                .help(overlayBlocker ?? "Position the overlays on this clip.")
 
                 Button("Import Selected") { model.importSelected() }
                     .disabled(selection.isEmpty)

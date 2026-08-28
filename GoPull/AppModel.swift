@@ -385,6 +385,60 @@ final class AppModel: ObservableObject {
         NSWorkspace.shared.open(destination)
     }
 
+    // MARK: - Deleting from the card
+
+    func deletionPlan(for rows: [MediaRow]) -> DeletionPlan {
+        DeletionPlan(rows: rows) { self.importedURL(for: $0) != nil }
+    }
+
+    @Published var pendingDeletion: DeletionPlan?
+    @Published private(set) var isDeleting = false
+    @Published private(set) var deletedCount = 0
+    @Published var deletionError: String?
+
+    /// Asks to delete. Nothing is removed until `confirmDeletion` is called.
+    func requestDeletion(of rows: [MediaRow]) {
+        guard !importer.isRunning, !rows.isEmpty else { return }
+        let plan = deletionPlan(for: rows)
+        guard !plan.isEmpty else { return }
+        pendingDeletion = plan
+    }
+
+    func cancelDeletion() { pendingDeletion = nil }
+
+    /// Deletes the files in the confirmed plan, one at a time.
+    func confirmDeletion() {
+        guard let plan = pendingDeletion, let camera, !isDeleting else { return }
+        pendingDeletion = nil
+        isDeleting = true
+        deletedCount = 0
+        deletionError = nil
+
+        Task { [weak self] in
+            guard let self else { return }
+            var failed: [String] = []
+            for file in plan.files {
+                // Deleting touches the control API, which an import makes
+                // unusable; refuse rather than time out halfway through.
+                guard !self.importer.isRunning else { break }
+                if await camera.delete(folder: file.folder, name: file.name) {
+                    self.deletedCount += 1
+                    self.selection.remove(file.id)
+                } else {
+                    failed.append(file.name)
+                }
+            }
+            if !failed.isEmpty {
+                self.deletionError = failed.count == 1
+                    ? "\(failed[0]) could not be deleted."
+                    : "\(failed.count) files could not be deleted: \(failed.prefix(3).joined(separator: ", "))…"
+            }
+            self.isDeleting = false
+            self.previews.forget(plan.files)
+            await self.refresh()
+        }
+    }
+
     // MARK: - GPR
 
     var hasGPRFiles: Bool { visibleFiles.contains { GPRConverter.isGPR(URL(fileURLWithPath: $0.name)) } }
@@ -500,9 +554,16 @@ final class AppModel: ObservableObject {
                 return
             }
             let track = raw.smoothed(settings.gauge.smoothing)
+            let gforce = ((try? GForceReader.read(clip)) ?? GForceTrack())
+                .smoothed(settings.gforce.smoothing)
             let destination = Self.overlayDestination(for: clip, settings: settings)
+            let rawGForce = (try? GForceReader.read(clip)) ?? GForceTrack()
+            // Measured raw; see OverlayEditor.applySmoothing.
+            let runs = AccelerationDetector.runs(in: raw, gforce: rawGForce,
+                                                 settings: settings.acceleration.detection)
             self.startOverlayExport(clip: clip, to: destination, track: track,
-                                    settings: settings, options: settings.export)
+                                    settings: settings, options: settings.export,
+                                    gforce: gforce, runs: runs)
             await self.overlayExportTask?.value
             if !self.overlayQueue.isEmpty { self.overlayQueue.removeFirst() }
             self.overlayQueueDone += 1
@@ -523,7 +584,9 @@ final class AppModel: ObservableObject {
     }
 
     func startOverlayExport(clip: URL, to destination: URL, track: TelemetryTrack,
-                            settings: OverlaySettings, options: ExportOptions) {
+                            settings: OverlaySettings, options: ExportOptions,
+                            gforce: GForceTrack = GForceTrack(),
+                            runs: [AccelerationRun] = []) {
         guard overlayExportTask == nil else { return }
         overlayExportError = nil
         overlayExportResult = nil
@@ -532,7 +595,8 @@ final class AppModel: ObservableObject {
             do {
                 try await self.overlayExporter.export(clip: clip, to: destination,
                                                       track: track, settings: settings,
-                                                      options: options)
+                                                      options: options, gforce: gforce,
+                                                      runs: runs)
                 self.overlayExportResult = destination
             } catch is CancellationError {
                 // Cancelling is not a failure worth an alert.

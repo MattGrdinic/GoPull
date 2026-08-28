@@ -709,3 +709,37 @@ are consistently in the vehicle frame.
 rather than by scanning pixels for a red blob — the first attempt at that test
 failed twice on bitmap row order, which is a good sign the test was measuring the
 wrong thing.
+
+
+## 34. The camera's timestamps are local time labelled UTC
+
+Photos taken at noon in Arizona were listed as 05:02 — seven hours out, which is
+exactly the UTC offset, in the direction that means local time was being read as
+UTC.
+
+Both of the camera's timestamp sources do it. `/gopro/media/list` reports `mod`
+and `cre` as seconds since the epoch *computed from the local wall clock*, and
+`GET` on a file returns `Last-Modified: Fri, 28 Aug 2026 12:02:32 GMT` for a
+photo taken at 12:02 local. Neither says anywhere that it is local.
+
+`GoProCamera` reads `/gopro/camera/get_date_time` once at discovery and works the
+offset out by parsing the camera's own wall clock *as if it were UTC* and
+comparing it with now. That deliberately ignores the `tzone` and `dst` fields the
+same response carries: it is not documented whether `tzone` already includes
+daylight saving or whether `dst` must be added to it, and guessing wrong is an
+hour's error for half the year across most of the world. Reading the clock needs
+no such interpretation, and on this camera it produced -25200s against a reported
+`tzone` of -420 minutes — the same answer, arrived at without the guess.
+
+The result is rounded to a quarter hour, since every real zone is a multiple of
+one, so a camera clock a few minutes out cannot skew it; and an offset over 15
+hours is refused, because that is a wrong clock rather than a time zone and
+baking it in would move every timestamp by the same error.
+
+Two traps worth knowing. The static helper cannot be called `clockOffset` while
+the property is: `GoProCamera.clockOffset(...)` is then ambiguous against the
+property's unapplied member reference, and the compiler answers "failed to
+produce diagnostic for expression" rather than saying so. And in the tests,
+`#expect(offset == -7 * 3600)` against a `TimeInterval?` fails — the bare literal
+expression does not infer to Double there — so the expectation is a typed
+constant.

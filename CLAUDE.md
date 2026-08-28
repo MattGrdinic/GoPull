@@ -214,6 +214,14 @@ only backed when every file of it is, so an unimported GPR keeps its JPEG's row 
 without the singleton. Delete is a context-menu item, the destructive button is not the default
 action, and it is disabled during an import.
 
+**Every timestamp the camera reports is local time wearing a UTC label.** `/gopro/media/list`
+gives `mod`/`cre` as an epoch computed from the camera's *local* wall clock, and the file server
+puts that same local time in `Last-Modified` with `GMT` after it — so a noon photo in Arizona
+showed as 05:02. `GoProCamera` works the offset out at discovery by reading the camera's own
+clock as UTC and comparing it with now, rounded to a quarter hour, and both timestamp paths
+subtract it. Deliberately *not* from the `tzone`/`dst` fields: it is undocumented whether `tzone`
+already includes daylight saving, and guessing wrong is an hour out for half the year.
+
 **Camera present with no card looks like no camera.** `/gopro/media/list` fails either way.
 `refresh()` disambiguates with `keepAlive()`; don't collapse those branches.
 

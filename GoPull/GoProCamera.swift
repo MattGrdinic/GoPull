@@ -118,10 +118,73 @@ actor GoProCamera {
             if let info = try? await probe(candidate) {
                 let camera = GoProCamera(ip: candidate, info: info)
                 await camera.enableWiredControl()
+                await camera.readClockOffset()
                 return camera
             }
         }
         throw CameraError.notFound
+    }
+
+    // MARK: - The camera's clock
+
+    /// Seconds the camera's clock runs ahead of UTC.
+    ///
+    /// Every timestamp the camera reports is local wall-clock time wearing a
+    /// UTC label, and nothing in either response says so. `/gopro/media/list`
+    /// gives `mod` and `cre` as seconds since the epoch computed from the local
+    /// clock, and the file server puts the same local time in `Last-Modified`
+    /// with `GMT` after it. In Arizona a photo taken at 12:02 came back as
+    /// `Fri, 28 Aug 2026 12:02:32 GMT` and was shown as 05:02 -- out by the
+    /// seven hours of the offset, in the wrong direction.
+    private(set) var clockOffset: TimeInterval = 0
+
+    /// A camera timestamp, corrected to a real instant.
+    func instant(fromCameraEpoch epoch: TimeInterval) -> Date {
+        Date(timeIntervalSince1970: epoch - clockOffset)
+    }
+
+    /// Works the offset out from what the camera says the time is.
+    ///
+    /// Deliberately not from the `tzone` and `dst` fields it also returns: it is
+    /// not documented whether `tzone` already includes daylight saving or
+    /// whether `dst` has to be added to it, and guessing wrong is an hour's
+    /// error for half the year in most of the world. Reading the camera's own
+    /// wall clock as UTC and comparing it with now needs no such interpretation.
+    ///
+    /// Rounded to a quarter hour, because every real zone is a multiple of one
+    /// and this way a camera clock a few minutes out does not skew it.
+    func readClockOffset() async {
+        guard let data = try? await get("/gopro/camera/get_date_time"),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let date = json["date"] as? String, let time = json["time"] as? String,
+              let offset = Self.offsetFromCameraClock(date: date, time: time)
+        else { return }
+        clockOffset = offset
+    }
+
+    /// The offset implied by the camera saying it is `date` at `time`.
+    ///
+    /// Returns nil when the reading cannot be parsed, or is far enough from now
+    /// that it is a wrong clock rather than another time zone -- baking a wrong
+    /// clock in as an offset would move every timestamp by the same error.
+    /// Named apart from the `clockOffset` property on purpose: with both called
+    /// `clockOffset`, `GoProCamera.clockOffset(...)` is ambiguous against the
+    /// property's unapplied member reference, and the compiler gives up rather
+    /// than saying so.
+    static func offsetFromCameraClock(date cameraDate: String, time cameraTime: String,
+                                      now: Date = Date()) -> TimeInterval? {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(identifier: "UTC")
+        formatter.dateFormat = "yyyy_MM_dd HH_mm_ss"
+        guard let asIfUTC = formatter.date(from: "\(cameraDate) \(cameraTime)") else { return nil }
+
+        let difference = asIfUTC.timeIntervalSince(now)
+        guard abs(difference) <= 15 * 3600 else { return nil }
+        // Every real zone is a multiple of a quarter hour, so rounding to one
+        // keeps a camera clock a few minutes out from skewing the offset.
+        let quarter: TimeInterval = 15 * 60
+        return (difference / quarter).rounded() * quarter
     }
 
     private static func probe(_ ip: String) async throws -> CameraInfo {
@@ -196,7 +259,7 @@ actor GoProCamera {
                 guard let name = entry["n"] as? String, !name.hasPrefix("._") else { continue }
                 let size = Self.int64(entry["s"]) ?? 0
                 let stamp = Self.int64(entry["mod"]) ?? Self.int64(entry["cre"])
-                let modified = stamp.map { Date(timeIntervalSince1970: TimeInterval($0)) }
+                let modified = stamp.map { instant(fromCameraEpoch: TimeInterval($0)) }
                 for expanded in Self.expand(name: name, entry: entry) {
                     files.append(MediaFile(folder: folder, name: expanded,
                                            size: size, modified: modified))
@@ -297,6 +360,8 @@ actor GoProCamera {
 
             if !needLookup.isEmpty {
                 let ip = self.ip
+                // Captured here: the tasks below run outside the actor.
+                let offset = self.clockOffset
                 let measured = await withTaskGroup(of: (IndexEntry, Int64, Date?)?.self) { group in
                     var pending = needLookup.makeIterator()
                     var inFlight = 0
@@ -306,7 +371,8 @@ actor GoProCamera {
                         guard let entry = pending.next() else { return }
                         inFlight += 1
                         group.addTask {
-                            guard let head = await Self.head(ip: ip, folder: folder, name: entry.name)
+                            guard let head = await Self.head(ip: ip, folder: folder,
+                                                             name: entry.name, offset: offset)
                             else { return nil }
                             return (entry, head.0, head.1)
                         }
@@ -345,7 +411,8 @@ actor GoProCamera {
     }
 
     /// Exact length and timestamp for one file.
-    private static func head(ip: String, folder: String, name: String) async -> (Int64, Date?)? {
+    private static func head(ip: String, folder: String, name: String,
+                             offset: TimeInterval) async -> (Int64, Date?)? {
         let encoded = "\(folder)/\(name)"
             .addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? "\(folder)/\(name)"
         guard let url = URL(string: "http://\(ip):8080\(dcimRoot)/\(encoded)") else { return nil }
@@ -361,7 +428,9 @@ actor GoProCamera {
 
         var modified: Date?
         if let header = http.value(forHTTPHeaderField: "Last-Modified") {
-            modified = httpDateFormatter.date(from: header)
+            // The camera writes its local wall clock here and calls it GMT, so
+            // this needs the same correction as the media list.
+            modified = httpDateFormatter.date(from: header)?.addingTimeInterval(-offset)
         }
         return (size, modified)
     }

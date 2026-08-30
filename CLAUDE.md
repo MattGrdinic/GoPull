@@ -144,6 +144,13 @@ the UI. `AppModel` routes them through `Task.detached` and only mutates publishe
 the main actor. `unmountForShutdown()` is the one deliberate exception, because blocking during
 `applicationWillTerminate` is both acceptable and necessary.
 
+**A slow import is the camera, not the card or us.** Throughput plateaus at four streams
+(40 MB/s at one, ~59 at four, no gain past that) and *falls as the camera reads* — 59 MB/s for
+the first 250 MB down to 47 by 1.5 GB, still dropping. A multi-gigabyte import ends up in the
+mid-30s and that is expected. The USB link negotiates 2500Base-T and the card reads far faster
+than the camera serves, so neither is the limit; widening the importer wins nothing. Numbers in
+DECISIONS #38.
+
 **Don't use `URLSession.shared` for camera traffic.** Its resource timeout defaults to seven
 days, which means requests survive the cable being pulled. `Importer` has its own session with
 15s request / 60s resource timeouts; `GoProCamera` likewise.

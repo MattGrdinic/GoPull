@@ -843,3 +843,38 @@ and once decoded it feeds the same offset arithmetic. On the HERO8 that gave
 
 `probe` tries modern first and falls back, so nothing about the newer cameras
 changes: a 404 there now means "older", not "absent".
+
+
+## 38. Import speed is the camera, and it fades as you read
+
+An import measured 34.4 MB/s against the 51 MB/s in these docs, and the card —
+a SanDisk Extreme Plus V30 A2 — was the natural suspect. It is not the card, and
+it is not us. Measured on the MISSION 1 PRO, all to `/dev/null` so no disk is
+involved:
+
+| streams | 1 | 2 | 4 | 6 | 8 | 12 |
+|---|---|---|---|---|---|---|
+| MB/s | 40.1 | 49.6 | 58.7 | 56.6 | 60.2 | 59.6 |
+
+It plateaus at four, so there is nothing to win by widening the importer — 8
+streams buy about 2%, inside the run-to-run noise. The USB link is not the limit
+either: the interface negotiates 2500Base-T, some 300 MB/s, and a V30 A2 card
+reads several times what the camera serves. Our importer managed 46.0 MB/s on a
+real 1.8 GB clip, which is most of what the camera was giving at the time.
+
+What actually explains a slow import is that the camera's throughput **falls as
+it reads**. Consecutive 250 MB windows, four streams each:
+
+| window | 0–250 | 250–500 | 500–750 | 750–1000 | 1000–1250 | 1250–1500 MB |
+|---|---|---|---|---|---|---|
+| MB/s | 59.0 | 55.3 | 49.8 | 51.0 | 47.2 | 46.7 |
+
+A fifth slower by 1.5 GB in, still falling. Over a multi-gigabyte import it keeps
+going, and the mid-30s is where it ends up — which is the number that prompted
+this. The single-clip figures elsewhere in these docs were measured on a 495 MB
+clip and are therefore best-case; they are not wrong, but they are the first
+window of that table.
+
+So: nothing to fix. A big import gets slower and that is the camera. A card
+reader bypasses it entirely and runs at the card's own speed, which is the only
+real remedy.

@@ -138,3 +138,61 @@ struct CameraClockTests {
         #expect(calendar.component(.hour, from: corrected) == 12)
     }
 }
+
+/// GoPro has two HTTP APIs, and they are not versions of one another: a HERO8
+/// 404s every modern path. Everything needed to get footage off the card exists
+/// in both, so only the paths differ.
+struct CameraAPITests {
+
+    @Test func eachApiUsesItsOwnPaths() {
+        #expect(CameraAPI.modern.infoPath == "/gopro/camera/info")
+        #expect(CameraAPI.legacy.infoPath == "/gp/gpControl/info")
+        #expect(CameraAPI.modern.mediaListPath == "/gopro/media/list")
+        #expect(CameraAPI.legacy.mediaListPath == "/gp/gpMediaList")
+        #expect(CameraAPI.modern.keepAlivePath != CameraAPI.legacy.keepAlivePath)
+    }
+
+    /// Thumbnails, media info and the telemetry download are modern-only, so
+    /// the previews and the pre-import badges have to stand down rather than
+    /// fail one 404 at a time.
+    @Test func onlyTheModernApiServesPreviews() {
+        #expect(CameraAPI.modern.servesPreviews)
+        #expect(!CameraAPI.legacy.servesPreviews)
+        #expect(CameraAPI.modern.needsWiredControl)
+        #expect(!CameraAPI.legacy.needsWiredControl)
+    }
+
+    @Test func deletePathsDifferAndAreEncoded() {
+        let modern = CameraAPI.modern.deletePath(for: "100GOPRO/GX010001.MP4")
+        let legacy = CameraAPI.legacy.deletePath(for: "100GOPRO/GX010001.MP4")
+        #expect(modern == "/gopro/media/delete/file?path=100GOPRO/GX010001.MP4")
+        #expect(legacy == "/gp/gpControl/command/storage/delete?p=100GOPRO/GX010001.MP4")
+        // A space has to survive as an escape, not as a broken query.
+        #expect(CameraAPI.modern.deletePath(for: "100GOPRO/A B.MP4")?
+            .contains(" ") == false)
+    }
+
+    /// The legacy camera has no `get_date_time`; status key 40 is the wall
+    /// clock as six percent-encoded bytes — year since 2000, month, day, h,m,s.
+    @Test func theLegacyClockDecodes() throws {
+        let clock = try #require(GoProCamera.decodeLegacyClock("%1A%08%1D%11%36%24"))
+        #expect(clock.date == "2026_08_29")
+        #expect(clock.time == "17_54_36")
+    }
+
+    /// And it feeds the same offset arithmetic as the modern reading.
+    @Test func theLegacyClockGivesTheSameOffset() throws {
+        let clock = try #require(GoProCamera.decodeLegacyClock("%1A%08%1D%11%36%24"))
+        // 17:54:36 local while UTC is 00:54:36 the next day: UTC-7.
+        let utc = Date(timeIntervalSince1970: 1788051276)
+        let offset = GoProCamera.offsetFromCameraClock(date: clock.date, time: clock.time,
+                                                       now: utc)
+        let expected: TimeInterval = -7 * 3600
+        #expect(offset == expected)
+    }
+
+    @Test func aMalformedLegacyClockIsRefused() {
+        #expect(GoProCamera.decodeLegacyClock("%1A%08") == nil)
+        #expect(GoProCamera.decodeLegacyClock("") == nil)
+    }
+}

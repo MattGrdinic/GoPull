@@ -268,7 +268,8 @@ final class AppModel: ObservableObject {
             cameraIP = camera.ip
             files = tree.keys.sorted().flatMap { tree[$0] ?? [] }
             freeBytes = free
-            previews.update(cameraIP: camera.ip)
+            previews.update(cameraIP: camera.ip,
+                            servesPreviews: await camera.api.servesPreviews)
             selection = selection.filter { id in files.contains { $0.id == id } }
 
             server.update(CardSnapshot(cameraIP: camera.ip,

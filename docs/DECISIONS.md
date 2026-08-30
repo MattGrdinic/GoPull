@@ -803,3 +803,78 @@ Measuring this is awkward: `log show --predicate 'eventMessage CONTAINS
 "Publishing changes"'` returned 0 while the warnings were being seen, because
 under Xcode they surface on the console rather than in the unified log. Check the
 Xcode console, or run the app standalone and use the log.
+
+
+## 37. GoPro has two HTTP APIs, and the older one is not a subset
+
+A HERO8 was "not found". It was on the network the whole time, at exactly the
+address discovery derives — `probe` asked it for `/gopro/camera/info`, got a 404,
+and concluded there was no camera there.
+
+The HERO8 speaks GoPro's legacy API. The two are not versions of one another:
+
+| | modern (HERO9+, MISSION) | legacy (HERO8 and earlier) |
+|---|---|---|
+| info | `/gopro/camera/info` | `/gp/gpControl/info`, nested under `info` |
+| media list | `/gopro/media/list` | `/gp/gpMediaList` |
+| liveness | `/gopro/camera/keep_alive` | `/gp/gpControl/status` |
+| state | `/gopro/camera/state` | `/gp/gpControl/status` |
+| delete | `…/delete/file?path=` | `/gp/gpControl/command/storage/delete?p=` |
+| files | `/videos/DCIM/…` | **same** |
+| range requests | 206 | **206** |
+
+The two things that made this cheap: the media list is the *same JSON* — same
+`media`/`d`/`fs`/`n`/`s`/`cre`/`mod` — so one parser serves both, and the file
+server is identical, so the WebDAV bridge and the parallel importer did not
+change at all. Verified end to end: a 52 MB clip imported from the HERO8
+byte-exact, 0 failures.
+
+What the older camera genuinely does not have is thumbnails, `media/info` and
+the GPMF-only telemetry download. Those are recorded once on `CameraAPI` as
+`servesPreviews` rather than discovered one 404 at a time, and `PreviewStore`
+stands down, so rows fall back to their icon and the pre-import GPS badges stay
+away instead of every row firing three failing requests.
+
+The clock correction from #34 works on both, which was not a given since the
+legacy camera has no `get_date_time`. Status key 40 carries the wall clock as
+six percent-encoded bytes — year since 2000, month, day, hour, minute, second —
+and once decoded it feeds the same offset arithmetic. On the HERO8 that gave
+-7 h, and its timestamps came back at plausible shooting times.
+
+`probe` tries modern first and falls back, so nothing about the newer cameras
+changes: a 404 there now means "older", not "absent".
+
+
+## 38. Import speed is the camera, and it fades as you read
+
+An import measured 34.4 MB/s against the 51 MB/s in these docs, and the card —
+a SanDisk Extreme Plus V30 A2 — was the natural suspect. It is not the card, and
+it is not us. Measured on the MISSION 1 PRO, all to `/dev/null` so no disk is
+involved:
+
+| streams | 1 | 2 | 4 | 6 | 8 | 12 |
+|---|---|---|---|---|---|---|
+| MB/s | 40.1 | 49.6 | 58.7 | 56.6 | 60.2 | 59.6 |
+
+It plateaus at four, so there is nothing to win by widening the importer — 8
+streams buy about 2%, inside the run-to-run noise. The USB link is not the limit
+either: the interface negotiates 2500Base-T, some 300 MB/s, and a V30 A2 card
+reads several times what the camera serves. Our importer managed 46.0 MB/s on a
+real 1.8 GB clip, which is most of what the camera was giving at the time.
+
+What actually explains a slow import is that the camera's throughput **falls as
+it reads**. Consecutive 250 MB windows, four streams each:
+
+| window | 0–250 | 250–500 | 500–750 | 750–1000 | 1000–1250 | 1250–1500 MB |
+|---|---|---|---|---|---|---|
+| MB/s | 59.0 | 55.3 | 49.8 | 51.0 | 47.2 | 46.7 |
+
+A fifth slower by 1.5 GB in, still falling. Over a multi-gigabyte import it keeps
+going, and the mid-30s is where it ends up — which is the number that prompted
+this. The single-clip figures elsewhere in these docs were measured on a 495 MB
+clip and are therefore best-case; they are not wrong, but they are the first
+window of that table.
+
+So: nothing to fix. A big import gets slower and that is the camera. A card
+reader bypasses it entirely and runs at the card's own speed, which is the only
+real remedy.

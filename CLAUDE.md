@@ -306,6 +306,14 @@ so `#include "syntax.h"` still resolves to the right header.
 **`vc5_decoder_parameters_set_default` does not set the allocator.** `mem_alloc` and `mem_free`
 are left as whatever was on the stack, so the decoder segfaults on its first allocation. Set them.
 
+**There are two GoPro HTTP APIs and the old one is not a subset.** A HERO8 404s every
+`/gopro/...` path and serves `/gp/gpControl/info`, `/gp/gpMediaList` and
+`/gp/gpControl/status` instead — `CameraAPI` picks the dialect at discovery, modern first.
+The media list is the *same JSON* and the file server is the same `/videos/DCIM` with working
+range requests, so the parser, the mount and the importer are untouched. Thumbnails,
+`media/info` and the telemetry download simply do not exist there: `servesPreviews` is false
+and `PreviewStore` stands down rather than 404ing per row. DECISIONS #37.
+
 **Camera must be in "GoPro Connect" USB mode**, not MTP, or nothing is discoverable.
 
 ## Testing against real hardware

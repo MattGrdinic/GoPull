@@ -102,7 +102,14 @@ final class PreviewStore: ObservableObject {
     }()
 
     /// A different camera means a different card, so nothing carries over.
-    func update(cameraIP: String) {
+    /// A camera that serves none of this -- a HERO8 has no thumbnail, media
+    /// info or telemetry endpoint at all -- is recorded here rather than
+    /// discovered one 404 at a time. `request` then does nothing, which is what
+    /// makes the rows fall back to their icon and the badges stay away.
+    @Published private(set) var servesPreviews = true
+
+    func update(cameraIP: String, servesPreviews: Bool = true) {
+        self.servesPreviews = servesPreviews
         guard cameraIP != self.cameraIP else { return }
         self.cameraIP = cameraIP
         thumbnails.removeAll()
@@ -147,7 +154,7 @@ final class PreviewStore: ObservableObject {
     /// every redraw -- because everything already known or already asked for is
     /// filtered out here.
     func request(_ file: MediaFile) {
-        guard !isSuspended, !cameraIP.isEmpty else { return }
+        guard !isSuspended, !cameraIP.isEmpty, servesPreviews else { return }
         guard thumbnails[file.id] == nil || details[file.id] == nil
                 || (MediaPreview.isVideo(file) && summaries[file.id] == nil)
         else { return }

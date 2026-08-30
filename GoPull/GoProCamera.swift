@@ -51,6 +51,44 @@ struct CameraInfo: Equatable {
     var firmware: String
 }
 
+/// Which of GoPro's two HTTP APIs a camera speaks.
+///
+/// They are not versions of one API: the paths differ, and the older one is
+/// missing whole features rather than spelling them differently. Everything
+/// that matters for getting footage off the card exists in both -- the media
+/// list is the *same JSON*, the file server is at the same `/videos/DCIM`, and
+/// both answer range requests -- so the mount and the importer do not care
+/// which is in front of them. Discovery settles it once and the rest asks.
+enum CameraAPI: Equatable {
+    /// HERO9 and later, and the MISSION: `/gopro/...`
+    case modern
+    /// HERO8 and earlier: `/gp/gpControl`, `/gp/gpMediaList`
+    case legacy
+
+    var infoPath: String { self == .modern ? "/gopro/camera/info" : "/gp/gpControl/info" }
+    var mediaListPath: String { self == .modern ? "/gopro/media/list" : "/gp/gpMediaList" }
+    /// Cheap, and must answer even with no card in.
+    var keepAlivePath: String {
+        self == .modern ? "/gopro/camera/keep_alive" : "/gp/gpControl/status"
+    }
+    var statePath: String { self == .modern ? "/gopro/camera/state" : "/gp/gpControl/status" }
+
+    func deletePath(for file: String) -> String? {
+        guard let encoded = file.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed)
+        else { return nil }
+        return self == .modern
+            ? "/gopro/media/delete/file?path=\(encoded)"
+            : "/gp/gpControl/command/storage/delete?p=\(encoded)"
+    }
+
+    /// Thumbnails, `media/info` and the GPMF-only telemetry download are all
+    /// modern-only. A HERO8 simply has nothing to serve for them, so the
+    /// previews and the pre-import GPS badges stand down rather than fail.
+    var servesPreviews: Bool { self == .modern }
+    /// `/gopro/camera/control/wired_usb`, which the older cameras do not need.
+    var needsWiredControl: Bool { self == .modern }
+}
+
 enum CameraError: LocalizedError {
     case notFound
     case http(String, Int)
@@ -73,12 +111,15 @@ actor GoProCamera {
 
     let ip: String
     let info: CameraInfo
+    /// Which HTTP API this camera speaks, settled at discovery.
+    let api: CameraAPI
 
     private let session: URLSession
 
-    private init(ip: String, info: CameraInfo) {
+    private init(ip: String, info: CameraInfo, api: CameraAPI) {
         self.ip = ip
         self.info = info
+        self.api = api
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = 15
         config.requestCachePolicy = .reloadIgnoringLocalCacheData
@@ -115,8 +156,8 @@ actor GoProCamera {
 
     static func discover() async throws -> GoProCamera {
         for candidate in candidateAddresses() {
-            if let info = try? await probe(candidate) {
-                let camera = GoProCamera(ip: candidate, info: info)
+            if let (info, api) = try? await probe(candidate) {
+                let camera = GoProCamera(ip: candidate, info: info, api: api)
                 await camera.enableWiredControl()
                 await camera.readClockOffset()
                 return camera
@@ -154,12 +195,46 @@ actor GoProCamera {
     /// Rounded to a quarter hour, because every real zone is a multiple of one
     /// and this way a camera clock a few minutes out does not skew it.
     func readClockOffset() async {
-        guard let data = try? await get("/gopro/camera/get_date_time"),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let date = json["date"] as? String, let time = json["time"] as? String,
-              let offset = Self.offsetFromCameraClock(date: date, time: time)
+        let reading: (date: String, time: String)?
+        switch api {
+        case .modern:
+            reading = await modernClockReading()
+        case .legacy:
+            // No `get_date_time`, but status key 40 is the wall clock as six
+            // percent-encoded bytes -- year since 2000, month, day, h, m, s.
+            reading = await legacyClockReading()
+        }
+        guard let reading,
+              let offset = Self.offsetFromCameraClock(date: reading.date, time: reading.time)
         else { return }
         clockOffset = offset
+    }
+
+    private func modernClockReading() async -> (date: String, time: String)? {
+        guard let data = try? await get("/gopro/camera/get_date_time"),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let date = json["date"] as? String, let time = json["time"] as? String
+        else { return nil }
+        return (date, time)
+    }
+
+    private func legacyClockReading() async -> (date: String, time: String)? {
+        guard let data = try? await get(api.statePath),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let status = json["status"] as? [String: Any],
+              let raw = status["40"] as? String
+        else { return nil }
+        return Self.decodeLegacyClock(raw)
+    }
+
+    /// `%1A%08%1D%11%36%24` -> ("2026_08_29", "17_54_36").
+    static func decodeLegacyClock(_ raw: String) -> (date: String, time: String)? {
+        guard let decoded = raw.removingPercentEncoding else { return nil }
+        let bytes = Array(decoded.unicodeScalars.map { UInt8($0.value & 0xFF) })
+        guard bytes.count >= 6 else { return nil }
+        let year = 2000 + Int(bytes[0])
+        return (String(format: "%04d_%02d_%02d", year, Int(bytes[1]), Int(bytes[2])),
+                String(format: "%02d_%02d_%02d", Int(bytes[3]), Int(bytes[4]), Int(bytes[5])))
     }
 
     /// The offset implied by the camera saying it is `date` at `time`.
@@ -187,19 +262,27 @@ actor GoProCamera {
         return (difference / quarter).rounded() * quarter
     }
 
-    private static func probe(_ ip: String) async throws -> CameraInfo {
-        let url = URL(string: "http://\(ip):8080/gopro/camera/info")!
-        var request = URLRequest(url: url)
-        request.timeoutInterval = 3
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard (response as? HTTPURLResponse)?.statusCode == 200,
-              let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let model = json["model_name"] as? String else {
-            throw CameraError.malformed("camera info")
+    /// Asks a candidate address what it is, trying both APIs.
+    ///
+    /// The modern one first, because that is what everything since the HERO9
+    /// speaks; a camera that 404s it is not absent, it is older. The legacy
+    /// response nests the same fields one level down under `info`.
+    private static func probe(_ ip: String) async throws -> (CameraInfo, CameraAPI) {
+        for api in [CameraAPI.modern, .legacy] {
+            guard let url = URL(string: "http://\(ip):8080\(api.infoPath)") else { continue }
+            var request = URLRequest(url: url)
+            request.timeoutInterval = 3
+            guard let (data, response) = try? await URLSession.shared.data(for: request),
+                  (response as? HTTPURLResponse)?.statusCode == 200,
+                  let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            else { continue }
+            let json = (root["info"] as? [String: Any]) ?? root
+            guard let model = json["model_name"] as? String else { continue }
+            return (CameraInfo(model: model,
+                               serial: json["serial_number"] as? String ?? "",
+                               firmware: json["firmware_version"] as? String ?? ""), api)
         }
-        return CameraInfo(model: model,
-                          serial: json["serial_number"] as? String ?? "",
-                          firmware: json["firmware_version"] as? String ?? "")
+        throw CameraError.malformed("camera info")
     }
 
     // MARK: - Requests
@@ -214,7 +297,7 @@ actor GoProCamera {
 
     @discardableResult
     func keepAlive() async -> Bool {
-        ((try? await get("/gopro/camera/keep_alive")) != nil)
+        ((try? await get(api.keepAlivePath)) != nil)
     }
 
     /// Deletes one file from the card. Returns false if the camera refused.
@@ -222,20 +305,19 @@ actor GoProCamera {
     /// There is no undo on the camera side and no trash — the file is gone from
     /// the card the moment this succeeds.
     func delete(folder: String, name: String) async -> Bool {
-        let path = "\(folder)/\(name)"
-        guard let encoded = path.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed)
-        else { return false }
-        return (try? await get("/gopro/media/delete/file?path=\(encoded)")) != nil
+        guard let path = api.deletePath(for: "\(folder)/\(name)") else { return false }
+        return (try? await get(path)) != nil
     }
 
     @discardableResult
     func enableWiredControl() async -> Bool {
-        ((try? await get("/gopro/camera/control/wired_usb?p=1")) != nil)
+        guard api.needsWiredControl else { return true }
+        return ((try? await get("/gopro/camera/control/wired_usb?p=1")) != nil)
     }
 
     /// Free space on the card. Camera status key 54 reports it in kilobytes.
     func freeBytes() async -> Int64 {
-        guard let data = try? await get("/gopro/camera/state"),
+        guard let data = try? await get(api.statePath),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let status = json["status"] as? [String: Any] else { return 0 }
         if let kb = status["54"] as? NSNumber { return kb.int64Value * 1024 }
@@ -244,7 +326,8 @@ actor GoProCamera {
     }
 
     func mediaList() async throws -> [String: [MediaFile]] {
-        let data = try await get("/gopro/media/list")
+        // Byte-for-byte the same shape on both APIs, so one parser serves.
+        let data = try await get(api.mediaListPath)
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               let media = json["media"] as? [[String: Any]] else {
             throw CameraError.malformed("media list")

@@ -803,3 +803,43 @@ Measuring this is awkward: `log show --predicate 'eventMessage CONTAINS
 "Publishing changes"'` returned 0 while the warnings were being seen, because
 under Xcode they surface on the console rather than in the unified log. Check the
 Xcode console, or run the app standalone and use the log.
+
+
+## 37. GoPro has two HTTP APIs, and the older one is not a subset
+
+A HERO8 was "not found". It was on the network the whole time, at exactly the
+address discovery derives — `probe` asked it for `/gopro/camera/info`, got a 404,
+and concluded there was no camera there.
+
+The HERO8 speaks GoPro's legacy API. The two are not versions of one another:
+
+| | modern (HERO9+, MISSION) | legacy (HERO8 and earlier) |
+|---|---|---|
+| info | `/gopro/camera/info` | `/gp/gpControl/info`, nested under `info` |
+| media list | `/gopro/media/list` | `/gp/gpMediaList` |
+| liveness | `/gopro/camera/keep_alive` | `/gp/gpControl/status` |
+| state | `/gopro/camera/state` | `/gp/gpControl/status` |
+| delete | `…/delete/file?path=` | `/gp/gpControl/command/storage/delete?p=` |
+| files | `/videos/DCIM/…` | **same** |
+| range requests | 206 | **206** |
+
+The two things that made this cheap: the media list is the *same JSON* — same
+`media`/`d`/`fs`/`n`/`s`/`cre`/`mod` — so one parser serves both, and the file
+server is identical, so the WebDAV bridge and the parallel importer did not
+change at all. Verified end to end: a 52 MB clip imported from the HERO8
+byte-exact, 0 failures.
+
+What the older camera genuinely does not have is thumbnails, `media/info` and
+the GPMF-only telemetry download. Those are recorded once on `CameraAPI` as
+`servesPreviews` rather than discovered one 404 at a time, and `PreviewStore`
+stands down, so rows fall back to their icon and the pre-import GPS badges stay
+away instead of every row firing three failing requests.
+
+The clock correction from #34 works on both, which was not a given since the
+legacy camera has no `get_date_time`. Status key 40 carries the wall clock as
+six percent-encoded bytes — year since 2000, month, day, hour, minute, second —
+and once decoded it feeds the same offset arithmetic. On the HERO8 that gave
+-7 h, and its timestamps came back at plausible shooting times.
+
+`probe` tries modern first and falls back, so nothing about the newer cameras
+changes: a 404 there now means "older", not "absent".

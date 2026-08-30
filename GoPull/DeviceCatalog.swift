@@ -120,7 +120,13 @@ enum DeviceCatalog {
 
     /// Proxies, thumbnails and sidecars -- worth showing on the mount, but not
     /// usually worth copying alongside the real footage.
-    static let sidecarExtensions: Set<String> = ["lrv", "lrf", "thm", "wav", "sav", "trinf"]
+    /// Proxies and scraps that are hidden unless asked for.
+    ///
+    /// `.wav` is deliberately *not* here. The MISSION writes an optional raw
+    /// audio track beside a clip, and unlike an `.LRV` it is not a smaller copy
+    /// of something already being imported -- it is the only copy of that audio.
+    /// Hiding it as a proxy meant it was never pulled off the card at all.
+    static let sidecarExtensions: Set<String> = ["lrv", "lrf", "thm", "sav", "trinf"]
 
     static func isSidecar(_ name: String) -> Bool {
         sidecarExtensions.contains((name as NSString).pathExtension.lowercased())

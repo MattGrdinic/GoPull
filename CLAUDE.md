@@ -298,6 +298,14 @@ function is separate from `draw` so the direction is testable without scanning p
 **Scale the g-meter from the smoothed track, not the raw one.** A single bump put the raw peak at
 2.82 g against 1.01 g smoothed, and full scale at 4 g left the ball in the middle for a whole ride.
 
+**A raw `.WAV` is not a sidecar.** The MISSION writes optional uncompressed audio beside a
+clip; `wav` used to sit in `sidecarExtensions` with `lrv`/`thm`, so it was filtered out as a
+proxy and never imported. An LRV is a smaller copy of something already coming across, a WAV
+is the only copy of that audio. It pairs by stem into `MediaRow.audio`, shows a WAV badge, and
+is always imported — not switchable like the raw stills, because it is small and unrecoverable.
+It arrives via `cardTree`'s directory walk; `/gopro/media/list` omits it but flags the clip
+with `pta: 1`. DECISIONS #39.
+
 **GPR is a DNG that macOS cannot decode.** ImageIO reports a `.GPR` as
 `com.adobe.raw-image`, reads every DNG tag out of it, and then fails to produce a single pixel or
 a thumbnail — the tile is VC-5 compressed. `GPRConverter` decodes it with GoPro's decoder,

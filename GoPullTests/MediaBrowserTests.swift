@@ -245,3 +245,66 @@ struct MediaRowImportTests {
         #expect(model.selectionSummary([]).bytes == 0)
     }
 }
+
+/// The MISSION writes an optional uncompressed audio track beside a clip.
+/// It pairs like a raw photo does — one shot, one row — but unlike a raw it is
+/// not switchable, because it is the only copy of that audio and it is small.
+struct RawAudioTests {
+
+    private func file(_ name: String, size: Int64 = 1_000_000) -> MediaFile {
+        MediaFile(folder: "100GOPRO", name: name, size: size, modified: nil)
+    }
+
+    @Test func aClipAndItsAudioAreOneRow() throws {
+        let rows = MediaBrowser.rows(from: [file("GX010098.MP4", size: 51_292_751),
+                                            file("GX010098.WAV", size: 2_138_316)])
+        #expect(rows.count == 1)
+        let row = try #require(rows.first)
+        #expect(row.name == "GX010098.MP4")
+        #expect(row.hasAudio)
+        #expect(row.size(includingRaw: true) == 53_431_067)
+    }
+
+    /// Always imported with the clip: leaving it behind silently loses it.
+    @Test func theAudioIsImportedEvenWithRawTurnedOff() throws {
+        let rows = MediaBrowser.rows(from: [file("GX010098.MP4"), file("GX010098.WAV")])
+        let row = try #require(rows.first)
+        #expect(row.files(includingRaw: false).count == 2)
+        #expect(row.files(includingRaw: false).contains { $0.name == "GX010098.WAV" })
+    }
+
+    /// A photo that happens to share a stem is not the same shot.
+    @Test func aStillDoesNotSwallowAudio() {
+        let rows = MediaBrowser.rows(from: [file("GP010098.JPG"), file("GP010098.WAV")])
+        #expect(rows.count == 2)
+        #expect(rows.contains { $0.isAudioOnly })
+    }
+
+    /// Audio whose clip has gone keeps a row, and counts as video so the
+    /// Video filter still shows it.
+    @Test func audioWithNoClipKeepsItsOwnRow() throws {
+        let rows = MediaBrowser.rows(from: [file("GX010098.WAV")])
+        let row = try #require(rows.first)
+        #expect(row.isAudioOnly)
+        #expect(row.isVideo)
+        #expect(!row.isPhoto)
+        #expect(MediaFilter.video.matches(row))
+    }
+
+    /// It was hidden as a proxy before, which meant it never came off the card.
+    @Test func rawAudioIsNotAProxy() {
+        #expect(!DeviceCatalog.isSidecar("GX010098.WAV"))
+        #expect(DeviceCatalog.isSidecar("GL010098.LRV"))
+        #expect(DeviceCatalog.isSidecar("GX010098.THM"))
+    }
+
+    @Test func aClipWithBothARawAndAudioCarriesBoth() throws {
+        // Not a combination the camera writes today, but the row must not drop
+        // one when it does.
+        var rows = MediaBrowser.rows(from: [file("GX010098.MP4"), file("GX010098.WAV")])
+        rows[0].raw = file("GX010098.GPR", size: 20_000_000)
+        let row = rows[0]
+        #expect(row.files(includingRaw: true).count == 3)
+        #expect(row.files(includingRaw: false).count == 2)
+    }
+}

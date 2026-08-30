@@ -19,6 +19,13 @@ struct MediaRow: Identifiable, Hashable {
     var primary: MediaFile
     /// The raw file shot at the same moment, when there is one.
     var raw: MediaFile?
+    /// The uncompressed audio the camera wrote beside a clip, when asked for.
+    ///
+    /// Always imported with its clip rather than being switchable like the raw
+    /// stills: it is the only copy of that audio, it is small next to the video
+    /// (2 MB against 51 MB on a real clip), and leaving it behind silently
+    /// loses it.
+    var audio: MediaFile?
 
     var id: String { primary.id }
     var name: String { primary.name }
@@ -27,8 +34,10 @@ struct MediaRow: Identifiable, Hashable {
 
     /// Everything this row would import.
     func files(includingRaw: Bool) -> [MediaFile] {
-        guard let raw, includingRaw else { return [primary] }
-        return [primary, raw]
+        var result = [primary]
+        if let raw, includingRaw { result.append(raw) }
+        if let audio { result.append(audio) }
+        return result
     }
 
     /// Bytes this row would copy.
@@ -37,14 +46,23 @@ struct MediaRow: Identifiable, Hashable {
     }
 
     var hasRaw: Bool { raw != nil }
+    var hasAudio: Bool { audio != nil }
     /// A raw file with no JPEG beside it still gets a row of its own.
     var isRawOnly: Bool { raw == nil && MediaRow.isRaw(primary) }
+    /// As does audio whose clip has gone.
+    var isAudioOnly: Bool { MediaRow.isRawAudio(primary) }
 
-    var isVideo: Bool { MediaPreview.isVideo(primary) }
+    /// Audio counts as video: it was shot with a clip, so hiding it under the
+    /// Photos filter -- or under neither -- is not what anyone means.
+    var isVideo: Bool { MediaPreview.isVideo(primary) || isAudioOnly }
     var isPhoto: Bool { MediaPreview.isStill(primary) || isRawOnly }
 
     static func isRaw(_ file: MediaFile) -> Bool {
         file.name.lowercased().hasSuffix(".gpr")
+    }
+
+    static func isRawAudio(_ file: MediaFile) -> Bool {
+        file.name.lowercased().hasSuffix(".wav")
     }
 
     /// "GP010015" — what a raw and its JPEG have in common.
@@ -109,22 +127,36 @@ enum MediaBrowser {
         for file in files where isRaw(file) {
             raws["\(file.folder)/\(MediaRow.stem(file.name))"] = file
         }
+        // The camera names raw audio after its clip: GX010098.MP4 and
+        // GX010098.WAV are one shot, the same way a GPR and its JPEG are.
+        var audio: [String: MediaFile] = [:]
+        for file in files where MediaRow.isRawAudio(file) {
+            audio["\(file.folder)/\(MediaRow.stem(file.name))"] = file
+        }
 
         var result: [MediaRow] = []
         var pairedRaws: Set<String> = []
+        var pairedAudio: Set<String> = []
 
-        for file in files where !isRaw(file) {
+        for file in files where !isRaw(file) && !MediaRow.isRawAudio(file) {
             let key = "\(file.folder)/\(MediaRow.stem(file.name))"
             // Only a still pairs with a raw; a clip that happens to share a
             // stem with one is a coincidence, not the same shot.
+            var row = MediaRow(primary: file, raw: nil)
             if MediaPreview.isStill(file), let raw = raws[key] {
                 pairedRaws.insert(raw.id)
-                result.append(MediaRow(primary: file, raw: raw))
-            } else {
-                result.append(MediaRow(primary: file, raw: nil))
+                row.raw = raw
             }
+            if MediaPreview.isVideo(file), let track = audio[key] {
+                pairedAudio.insert(track.id)
+                row.audio = track
+            }
+            result.append(row)
         }
         for file in files where isRaw(file) && !pairedRaws.contains(file.id) {
+            result.append(MediaRow(primary: file, raw: nil))
+        }
+        for file in files where MediaRow.isRawAudio(file) && !pairedAudio.contains(file.id) {
             result.append(MediaRow(primary: file, raw: nil))
         }
         return result

@@ -348,11 +348,20 @@ struct ContentView: View {
                 HStack(spacing: 5) {
                     Text(file.name)
                     if row.hasRaw { rawBadge(row) }
+                    if let audio = row.audio {
+                        badge("WAV", filled: true)
+                            .help("Uncompressed audio, \(audio.size.byteLabel) — "
+                                  + "imported with the clip")
+                    }
                     if row.isVideo { overlayBadge(file) }
                     if row.isVideo { telemetryBadges(file) }
                     if row.isRawOnly {
                         badge("RAW", filled: true)
                             .help("A raw photo with no JPEG beside it")
+                    }
+                    if row.isAudioOnly {
+                        badge("WAV", filled: true)
+                            .help("Uncompressed audio with no clip beside it")
                     }
                     if file.isSidecar {
                         badge("proxy", filled: false)

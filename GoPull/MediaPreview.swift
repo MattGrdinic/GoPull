@@ -159,7 +159,9 @@ final class PreviewStore: ObservableObject {
                 || (MediaPreview.isVideo(file) && summaries[file.id] == nil)
         else { return }
         guard !queued.contains(file.id), !unavailable.contains(file.id) else { return }
-        guard !file.isSidecar else { return }
+        // Positively, rather than by excluding sidecars: raw audio is not a
+        // sidecar any more, and there is no thumbnail for a WAV either.
+        guard MediaPreview.isVideo(file) || MediaPreview.isStill(file) else { return }
 
         queued.insert(file.id)
         queue.append(file)

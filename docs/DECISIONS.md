@@ -878,3 +878,35 @@ window of that table.
 So: nothing to fix. A big import gets slower and that is the camera. A card
 reader bypasses it entirely and runs at the card's own speed, which is the only
 real remedy.
+
+
+## 39. Raw audio is a deliverable, not a proxy
+
+The MISSION can write an uncompressed `.WAV` beside a clip. The app was not
+importing it, and the reason was one word in a list: `wav` sat in
+`DeviceCatalog.sidecarExtensions` next to `lrv`, `lrf` and `thm`, so it was
+filtered out of the file list as a proxy and never copied.
+
+That grouping is wrong in the way that matters. An `.LRV` is a smaller copy of
+something already being imported, so hiding it loses nothing. A raw `.WAV` is the
+*only* copy of that audio, and hiding it loses it silently.
+
+It pairs like a GPR does — `GX010098.MP4` and `GX010098.WAV` are one shot, same
+folder, same stem — so `MediaRow` gained an `audio` companion beside `raw`, and
+the row shows a `WAV` badge with the size in its tooltip.
+
+Unlike the raw stills it is *not* switchable, and `files(includingRaw:)` returns
+it either way. Three reasons: it is the only copy, it is small next to the video
+(2.1 MB against 51.3 MB on a real clip), and the raw toggle exists because a GPR
+is large and often unwanted — neither of which is true here.
+
+Two details found while wiring it up. A `.WAV` reaches the list through
+`cardTree`'s directory walk rather than `/gopro/media/list`, which does not
+mention it at all — though the clip's entry does carry `pta: 1` the way a raw
+photo's carries `raw: 1`, so the flag is there if a faster path is ever wanted.
+And `PreviewStore.request` used to skip sidecars; with `.wav` no longer one, it
+now checks positively for video or stills, since there is no thumbnail for audio
+either way.
+
+Verified against the card: the row reads 53.4 MB for a 51.3 MB clip, and
+importing it brought both files across byte-exact.
